@@ -5208,12 +5208,12 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <!-- Boundaries (behind everything) -->
         <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="0" data-composition-frame-label="Single host, Docker" x="270" y="130" width="990" height="428" rx="12" class="c-region" stroke-width="1"/>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="security-group" data-composition-frame-id="1" data-composition-frame-label="Proxy is the only peer" x="550" y="130" width="220" height="138" rx="8" class="c-security-group" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="security-group" data-composition-frame-id="1" data-composition-frame-label="Proxies are the only network peers" x="550" y="130" width="220" height="138" rx="8" class="c-security-group" stroke-width="1"/>
 
         <!-- Connection paths (before components for correct z-order) -->
         <g data-graph-role="automatic-crossover" style="--step:0">
           <path data-graph-role="automatic-crossover-underlay" d="M 190 197 L 300 197" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="config" data-edge-to="scheduler" data-edge-label="deadline" data-edge-key="0" data-edge-id="c1" data-composition-points="190,197;300,197" data-composition-crossover="halo" data-composition-independent="true" d="M 190 197 L 300 197" class="a-default" data-animate="edge" style="--step:0" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+          <path data-edge-from="config" data-edge-to="scheduler" data-edge-label="yaml" data-edge-key="0" data-edge-id="c1" data-composition-points="190,197;300,197" data-composition-crossover="halo" data-composition-independent="true" d="M 190 197 L 300 197" class="a-default" data-animate="edge" style="--step:0" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:1">
           <path data-graph-role="automatic-crossover-underlay" d="M 450 204 L 580 204" fill="none" stroke="var(--mask)" stroke-width="5.8" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
@@ -5261,8 +5261,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         </g>
 
         <!-- Components -->
-        <g id="node-config" data-node-id="config" data-node-label="Agent config" tabindex="0" role="button" aria-label="Focus Agent config, deadline, models, limits, Architecture component" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="deadline, models, limits" data-node-context="Architecture component">
-          <title>Agent config · deadline, models, limits · Architecture component</title>
+        <g id="node-config" data-node-id="config" data-node-label="Agent config" tabindex="0" role="button" aria-label="Focus Agent config, models, limits, Architecture component" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="models, limits" data-node-context="Architecture component">
+          <title>Agent config · models, limits · Architecture component</title>
           <rect x="30" y="170" width="160" height="68" rx="8" class="c-mask"/>
           <rect x="30" y="170" width="160" height="68" rx="8" class="c-frontend" data-animate="node" style="--step:0" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(36 176) scale(0.6875)">
@@ -5272,7 +5272,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="110" y="202" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Agent config</text>
-        <text data-detail="context" x="110" y="218" class="t-muted" font-size="9" text-anchor="middle">deadline, models, limits</text>
+        <text data-detail="context" x="110" y="218" class="t-muted" font-size="9" text-anchor="middle">models, limits</text>
         </g>
 
         <g id="node-person" data-node-id="person" data-node-label="Person" tabindex="0" role="button" aria-label="Focus Person, takes over, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="takes over" data-node-context="Architecture component">
@@ -5299,19 +5299,19 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="context" x="110" y="518" class="t-muted" font-size="9" text-anchor="middle">same tenant</text>
         </g>
 
-        <g id="node-scheduler" data-node-id="scheduler" data-node-label="Scheduler" tabindex="0" role="button" aria-label="Focus Scheduler, EDF, leases, Single host, Docker" aria-pressed="false" data-node-kind="backend" data-node-sublabel="EDF, leases" data-node-context="Single host, Docker">
-          <title>Scheduler · EDF, leases · Single host, Docker</title>
+        <g id="node-scheduler" data-node-id="scheduler" data-node-label="Scheduler" tabindex="0" role="button" aria-label="Focus Scheduler, job id, caps, Single host, Docker" aria-pressed="false" data-node-kind="backend" data-node-sublabel="job id, caps" data-node-context="Single host, Docker">
+          <title>Scheduler · job id, caps · Single host, Docker</title>
           <rect x="300" y="170" width="150" height="68" rx="8" class="c-mask"/>
           <rect x="300" y="170" width="150" height="68" rx="8" class="c-backend" data-animate="node" style="--step:1" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(306 176) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="375" y="202" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Scheduler</text>
-        <text data-detail="context" x="375" y="218" class="t-muted" font-size="9" text-anchor="middle">EDF, leases</text>
+        <text data-detail="context" x="375" y="218" class="t-muted" font-size="9" text-anchor="middle">job id, caps</text>
         </g>
 
-        <g id="node-container" data-node-id="container" data-node-label="Run container" tabindex="0" role="button" aria-label="Focus Run container, fresh, run token only, Single host, Docker › Proxy is the only peer" aria-pressed="false" data-node-kind="security" data-node-sublabel="fresh, run token only" data-node-context="Single host, Docker › Proxy is the only peer">
-          <title>Run container · fresh, run token only · Single host, Docker › Proxy is the only peer</title>
+        <g id="node-container" data-node-id="container" data-node-label="Run container" tabindex="0" role="button" aria-label="Focus Run container, token, repo mount, Single host, Docker › Proxies are the only network peers" aria-pressed="false" data-node-kind="security" data-node-sublabel="token, repo mount" data-node-context="Single host, Docker › Proxies are the only network peers">
+          <title>Run container · token, repo mount · Single host, Docker › Proxies are the only network peers</title>
           <rect x="580" y="160" width="160" height="88" rx="8" class="c-mask"/>
           <rect x="580" y="160" width="160" height="88" rx="8" class="c-security" data-animate="node" style="--step:2" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(586 166) scale(0.6875)">
@@ -5319,7 +5319,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="660" y="202" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Run container</text>
-        <text data-detail="context" x="660" y="218" class="t-muted" font-size="9" text-anchor="middle">fresh, run token only</text>
+        <text data-detail="context" x="660" y="218" class="t-muted" font-size="9" text-anchor="middle">token, repo mount</text>
         </g>
 
         <g id="node-proxy" data-node-id="proxy" data-node-label="Egress proxy x2" tabindex="0" role="button" aria-label="Focus Egress proxy x2, key, budget, journal, Single host, Docker" aria-pressed="false" data-node-kind="security" data-node-sublabel="key, budget, journal" data-node-context="Single host, Docker">
@@ -5334,8 +5334,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="context" x="965" y="218" class="t-muted" font-size="9" text-anchor="middle">key, budget, journal</text>
         </g>
 
-        <g id="node-cloud" data-node-id="cloud" data-node-label="Cloud model" tabindex="0" role="button" aria-label="Focus Cloud model, rate limited, first, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="rate limited, first" data-node-context="Architecture component">
-          <title>Cloud model · rate limited, first · Architecture component</title>
+        <g id="node-cloud" data-node-id="cloud" data-node-label="Cloud model" tabindex="0" role="button" aria-label="Focus Cloud model, primary, priced, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="primary, priced" data-node-context="Architecture component">
+          <title>Cloud model · primary, priced · Architecture component</title>
           <rect x="700" y="20" width="170" height="64" rx="8" class="c-mask"/>
           <rect x="700" y="20" width="170" height="64" rx="8" class="c-external" data-animate="node" style="--step:5" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(706 26) scale(0.6875)">
@@ -5343,11 +5343,11 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="785" y="50" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Cloud model</text>
-        <text data-detail="context" x="785" y="66" class="t-muted" font-size="9" text-anchor="middle">rate limited, first</text>
+        <text data-detail="context" x="785" y="66" class="t-muted" font-size="9" text-anchor="middle">primary, priced</text>
         </g>
 
-        <g id="node-local" data-node-id="local" data-node-label="Local model" tabindex="0" role="button" aria-label="Focus Local model, fallback, batch slots, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="fallback, batch slots" data-node-context="Architecture component">
-          <title>Local model · fallback, batch slots · Architecture component</title>
+        <g id="node-local" data-node-id="local" data-node-label="Local model" tabindex="0" role="button" aria-label="Focus Local model, fallback, price 0, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="fallback, price 0" data-node-context="Architecture component">
+          <title>Local model · fallback, price 0 · Architecture component</title>
           <rect x="960" y="20" width="170" height="64" rx="8" class="c-mask"/>
           <rect x="960" y="20" width="170" height="64" rx="8" class="c-external" data-animate="node" style="--step:6" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(966 26) scale(0.6875)">
@@ -5355,7 +5355,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="1045" y="50" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Local model</text>
-        <text data-detail="context" x="1045" y="66" class="t-muted" font-size="9" text-anchor="middle">fallback, batch slots</text>
+        <text data-detail="context" x="1045" y="66" class="t-muted" font-size="9" text-anchor="middle">fallback, price 0</text>
         </g>
 
         <g id="node-mail" data-node-id="mail" data-node-label="Synthetic service" tabindex="0" role="button" aria-label="Focus Synthetic service, connector interface, Single host, Docker" aria-pressed="false" data-node-kind="backend" data-node-sublabel="connector interface" data-node-context="Single host, Docker">
@@ -5416,9 +5416,9 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         </g>
 
         <!-- Connection labels -->
-        <g data-detail="context" data-edge-from="config" data-edge-to="scheduler" data-edge-label="deadline" data-edge-key="0" data-edge-id="c1">
-          <rect x="220.8" y="177" width="48.4" height="14" rx="3" class="c-mask"/>
-          <text x="245" y="187" class="t-edge-default" font-size="8" text-anchor="middle">deadline</text>
+        <g data-detail="context" data-edge-from="config" data-edge-to="scheduler" data-edge-label="yaml" data-edge-key="0" data-edge-id="c1">
+          <rect x="230" y="177" width="30" height="14" rx="3" class="c-mask"/>
+          <text x="245" y="187" class="t-edge-default" font-size="8" text-anchor="middle">yaml</text>
         </g>
         <g data-detail="context" data-edge-from="scheduler" data-edge-to="container" data-edge-label="start, resume" data-edge-key="1" data-edge-id="c2">
           <rect x="478.8" y="184" width="72.4" height="14" rx="3" class="c-mask"/>
@@ -5471,9 +5471,9 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <text data-boundary-label="" x="278" y="153" class="t-cloud" font-size="9" font-weight="600">Single host, Docker</text>
         </g>
 
-        <g data-graph-role="structural-frame-label" data-composition-frame-id="1" data-composition-frame-kind="security-group" data-composition-frame-label="Proxy is the only peer">
-          <rect data-graph-role="structural-frame-label-mask" x="554" y="140" width="128.8" height="16" rx="3" class="c-mask"/>
-          <text data-boundary-label="" x="558" y="153" class="t-security" font-size="9" font-weight="600">Proxy is the only peer</text>
+        <g data-graph-role="structural-frame-label" data-composition-frame-id="1" data-composition-frame-kind="security-group" data-composition-frame-label="Proxies are the only network peers">
+          <rect data-graph-role="structural-frame-label-mask" x="554" y="140" width="193.6" height="16" rx="3" class="c-mask"/>
+          <text data-boundary-label="" x="558" y="153" class="t-security" font-size="9" font-weight="600">Proxies are the only network peers</text>
         </g>
 
         <!-- Legend -->
@@ -5683,12 +5683,11 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <h3>Scheduling 200 agents</h3>
         </div>
         <ul>
-          <li>Earliest deadline first: 200 briefs due 07:30 spread over 90 min</li>
-          <li>Provider: requests and tokens per minute; wait or switch model</li>
-          <li>Tenant: concurrency limit per tenant</li>
-          <li>Host: 8 containers, 0.5 CPU and 512 MB each</li>
-          <li>429: backoff with jitter, then local model; quota split across tenants</li>
-          <li>Predicted missed deadline escalates to a person</li>
+          <li>Orders by job_id. It does not use a deadline.</li>
+          <li>Host cap 8, a per-tenant cap, and a 90 minute window</li>
+          <li>200 ten-minute jobs place 72 and escalate 128</li>
+          <li>A 429, or three provider errors, falls back to local</li>
+          <li>max_steps and wall_s are parsed and not enforced</li>
         </ul>
       </div>
 
@@ -5698,11 +5697,11 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <h3>Sandbox</h3>
         </div>
         <ul>
-          <li>Regular user, read-only filesystem, 64 MB scratch disk</li>
-          <li>No extra capabilities or privilege escalation, default seccomp</li>
-          <li>Process, CPU and memory limits; py.exec as a subprocess</li>
-          <li>Run token is tied to the container IP and is not a credential</li>
-          <li>Cross-tenant read, CONNECT tunnel, direct model call: policy_denied</li>
+          <li>User 65534, read-only root, capabilities dropped, 64 MB noexec scratch</li>
+          <li>py.exec runs in the agent container. The proxy answers not_executed</li>
+          <li>The host repo is mounted read-only at /src</li>
+          <li>The run token is bound to the container IP and is not a credential</li>
+          <li>A cross-tenant mail.read is stored on the step as foreign_id</li>
         </ul>
       </div>
 
@@ -5712,12 +5711,11 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <h3>Failure and resume</h3>
         </div>
         <ul>
-          <li>Step key: run_id, step_no, hash of messages and tool args</li>
-          <li>STARTED before the call, COMPLETED or FAILED before the reply</li>
-          <li>SUCCEEDED only with an artifact citing own-tenant message IDs</li>
-          <li>Auto-resume: new container, same run_id, skips completed steps</li>
-          <li>Rerun a step that died STARTED and log cost_uncertain</li>
-          <li>Hand to a person: STOPPED_LOOP, STOPPED_BUDGET, 3 resumes, all models down, third denial</li>
+          <li>Step key: run, step number, hash of messages and tools</li>
+          <li>SUCCEEDED needs a last line cites: of ids in that tenant&#39;s mail or documents</li>
+          <li>A STARTED row 30 seconds old, or a newer generation, is taken over</li>
+          <li>That takeover can bill the provider twice. The ledger keeps one cost</li>
+          <li>Resume binds a new token and skips completed steps. The third resume escalates</li>
         </ul>
       </div>
 
@@ -5728,9 +5726,9 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         </div>
         <ul>
           <li>One membership per user: viewer, approver or admin</li>
-          <li>Proxy tenant scope plus Postgres RLS; unscoped query returns no rows</li>
-          <li>Evals: 20+ recorded cases, hard checks, temperature-0 judge, drop of 0.3 or less</li>
-          <li>Memory: cursor, facts, run summaries as quoted data; cursor moves on SUCCEEDED</li>
+          <li>Proxy tenant scope plus Postgres RLS; an unset tenant returns no rows</li>
+          <li>Evals: recorded cases, hard checks, temperature-0 judge, drop of 0.3 or less</li>
+          <li>The cursor is written on SUCCEEDED for a cited mail id. It is not read back</li>
           <li>Panel (design only): three models, two rounds, minority view kept</li>
         </ul>
       </div>
@@ -5743,8 +5741,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <ul>
           <li>Agents write drafts and cannot send</li>
           <li>send needs an approver in the same tenant</li>
-          <li>Message-ID from the draft ID, so a replay never sends twice</li>
-          <li>External or attached drafts are flagged and need their own approval</li>
+          <li>The SMTP log matches message_id, so a second deliver does not send</li>
+          <li>Domains come from the tenant row. External or attached drafts stay flagged</li>
         </ul>
       </div>
 
@@ -5754,9 +5752,9 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <h3>Not building, and hardening</h3>
         </div>
         <ul>
-          <li>Not built: live connectors, web UI, OIDC, replica, multi-host, panel</li>
+          <li>Not built: deadline scheduling, cursor reads, live connectors, web UI, OIDC, replica, panel</li>
           <li>Shared kernel: no gVisor or microVMs; a kernel exploit could reach other tenants</li>
-          <li>Weakest part: the proxy holds every credential, tenant map and budget</li>
+          <li>Weakest part: the proxy holds the provider key, the tenant map, and the budget</li>
           <li>1 Detect leaks: canary IDs and a fuzzer</li>
           <li>2 Firecracker microVM per run from a warm pool</li>
           <li>3 Vault and broker: five-minute, one-tenant tokens</li>

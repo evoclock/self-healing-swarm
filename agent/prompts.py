@@ -31,15 +31,6 @@ def doc_prompt(instructions: str, document: dict, total: str) -> list[dict]:
     ]
 
 
-def sheet_code(body: str) -> str:
-    amounts = []
-    for line in body.splitlines():
-        if not line or line.startswith("item,"):
-            continue
-        amounts.append(line.split(",", 1)[1])
-    return "print(" + "+".join(amounts) + ")"
-
-
 def external_recipient(messages: list[dict], domains: list[str]) -> str | None:
     allowed = set(domains)
     for message in messages:

@@ -179,8 +179,8 @@ def test_two_connections_resolve_the_same_token():
         )
         hidden = setup.execute("SELECT token FROM run_tokens").fetchall()
     with psycopg.connect(url, autocommit=True) as left, psycopg.connect(url, autocommit=True) as right:
-        assert resolve(left, "tok-a", "10.0.0.8") == {"tenant_id": "t-a", "run_id": "r-a-1"}
-        assert resolve(right, "tok-a", "10.0.0.8") == {"tenant_id": "t-a", "run_id": "r-a-1"}
+        assert resolve(left, "tok-a", "10.0.0.8") == {"tenant_id": "t-a", "run_id": "r-a-1", "generation": 0}
+        assert resolve(right, "tok-a", "10.0.0.8") == {"tenant_id": "t-a", "run_id": "r-a-1", "generation": 0}
         assert resolve(left, "tok-a", "10.0.0.9") is None
         direct = left.execute("SELECT token FROM run_tokens").fetchall()
     assert ("tok-a",) in hidden
@@ -194,13 +194,15 @@ def test_journal_writes_started_then_completed_and_denial():
         conn.execute("SELECT set_config('app.tenant_id', 't-a', false)")
         conn.execute("DELETE FROM steps WHERE arg_hash = %s", (digest,))
         conn.execute("DELETE FROM audit_log WHERE detail->>'reason' = 'connect'")
-        begin_step(conn, "t-a", "r-a-1", 1, digest, "primary", 0.01)
+        claim = begin_step(conn, "t-a", "r-a-1", 1, digest, "primary", 0.01)
+        assert claim is not None
+        assert begin_step(conn, "t-a", "r-a-1", 1, digest, "primary", 0.01) is None
         status = conn.execute(
             "SELECT status FROM steps WHERE run_id = 'r-a-1' AND step_no = 1 AND arg_hash = %s",
             (digest,),
         ).fetchone()
         assert status == ("STARTED",)
-        finish_step(conn, "t-a", "r-a-1", 1, digest, "COMPLETED", {"text": "ok"})
+        assert finish_step(conn, "t-a", "r-a-1", 1, digest, "COMPLETED", {"text": "ok"}, claim) is True
         status = conn.execute(
             "SELECT status FROM steps WHERE run_id = 'r-a-1' AND step_no = 1 AND arg_hash = %s",
             (digest,),
