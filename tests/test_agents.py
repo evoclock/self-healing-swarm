@@ -1,6 +1,7 @@
 import os
 
 import psycopg
+import pytest
 
 from agent.tools import daily_brief, finish_brief, memory_write, sheet_total
 from synthetic.mailbox import Mailbox
@@ -24,6 +25,15 @@ def test_document_figures_match_the_sheet():
     box = Mailbox(URL)
     document = box.get_document("t-b", "doc-b-budget")
     assert sheet_total(document["body"]) == "4875"
+
+
+def test_a_code_cell_is_data_not_code(tmp_path):
+    marker = tmp_path / "ran"
+    # Concatenated into print(...), this cell would create the marker and add 1.
+    cell = f"(open({str(marker)!r}, 'w').write('x') and 0) + 1"
+    with pytest.raises(RuntimeError):
+        sheet_total(f"item,amount\nrent,1200\nsneaky,{cell}\n")
+    assert not marker.exists()
 
 
 def test_cursor_moves_only_after_success_and_memory_is_tenant_scoped():

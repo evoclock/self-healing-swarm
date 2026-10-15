@@ -1,12 +1,14 @@
 import hashlib
 import json
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 
 PRICE_PER_MILLION = {
-    "primary": (2.0, 6.0),
-    "local": (0.0, 0.0),
+    "primary": (Decimal("2.0"), Decimal("6.0")),
+    "local": (Decimal("0"), Decimal("0")),
 }
+OUTPUT_CAP = 512
 
 GATEWAY_BASE_URL = "https://api-gateway.merge.dev/v1/openai"
 LOCAL_BASE_URL = "http://127.0.0.1:18894/v1"
@@ -44,9 +46,15 @@ class Completion:
         return cls(data["text"], int(data["tokens_in"]), int(data["tokens_out"]))
 
 
-def estimate_usd(model: str, tokens_in: int, tokens_out: int) -> float:
+def estimate_usd(model: str, tokens_in: int, tokens_out: int) -> Decimal:
     price_in, price_out = PRICE_PER_MILLION[model]
     return (tokens_in * price_in + tokens_out * price_out) / 1_000_000
+
+
+def server_estimate(model: str, messages) -> Decimal:
+    """Input tokens from the serialized messages, output at the fixed cap. Payload estimates are ignored."""
+    tokens_in = len(json.dumps(messages, sort_keys=True, separators=(",", ":"))) // 4
+    return estimate_usd(model, tokens_in, OUTPUT_CAP)
 
 
 def step_digest(messages, tools) -> str:
@@ -92,7 +100,7 @@ class Provider:
             tools,
             model,
             temperature=0 if temperature is None else temperature,
-            max_tokens=512 if max_tokens is None else max_tokens,
+            max_tokens=OUTPUT_CAP if max_tokens is None else max_tokens,
         )
         self.cassette.put(digest, completion.to_json())
         return completion

@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import psycopg
 
@@ -22,9 +23,15 @@ def message_id_for(draft_id: str) -> str:
     return f"<{draft_id}@outbox>"
 
 
-def create_draft(conn, tenant: str, draft_id: str, to_addr: str, subject: str, body: str, domains: tuple[str, ...], attachments: tuple = ()) -> dict:
-    reasons = flag_reasons(to_addr, domains, attachments)
+def tenant_domains(conn, tenant: str) -> tuple[str, ...]:
     conn.execute("SELECT set_config('app.tenant_id', %s, false)", (tenant,))
+    row = conn.execute("SELECT domains FROM tenants WHERE tenant_id = %s", (tenant,)).fetchone()
+    return tuple(row[0]) if row else ()
+
+
+def create_draft(conn, tenant: str, draft_id: str, to_addr: str, subject: str, body: str, attachments: tuple = ()) -> dict:
+    """Flags come from tenants.domains. A caller cannot name the domains."""
+    reasons = flag_reasons(to_addr, tenant_domains(conn, tenant), attachments)
     conn.execute(
         """
         INSERT INTO outbox (draft_id, tenant_id, to_addr, subject, body, attachments, flagged, flag_reasons, state, message_id)
@@ -61,11 +68,16 @@ def approve(conn, tenant: str, draft_id: str, approver_user: str) -> dict:
     return fetch_draft(conn, draft_id)
 
 
-def deliver(conn, tenant: str, draft_id: str, sink: list, smtp: tuple[str, int] | None = None) -> dict:
+def deliver(conn, tenant: str, draft_id: str, sink: list, smtp: tuple[str, int] | None = None, sent_log: Path | None = None) -> dict:
+    """SMTP first, then the sink. If SMTP raises, the draft stays SENDING and the sink is unchanged.
+
+    sent_log is the JSON-lines file the SMTP server writes. A Message-ID already in it is not sent again,
+    even when the sink is new.
+    """
     conn.execute("SELECT set_config('app.tenant_id', %s, false)", (tenant,))
     draft = fetch_draft(conn, draft_id)
     message_id = draft["message_id"]
-    already = any(item["message_id"] == message_id for item in sink)
+    already = any(item["message_id"] == message_id for item in sink) or _logged(sent_log, message_id)
     if draft["state"] == "SENT" or already:
         conn.execute(
             "UPDATE outbox SET state = 'SENT' WHERE draft_id = %s",
@@ -75,14 +87,21 @@ def deliver(conn, tenant: str, draft_id: str, sink: list, smtp: tuple[str, int] 
     if draft["state"] not in ("APPROVED", "SENDING"):
         raise ValueError(draft["state"])
     conn.execute("UPDATE outbox SET state = 'SENDING' WHERE draft_id = %s", (draft_id,))
-    item = {"message_id": message_id, "to": draft["to_addr"], "body": draft["body"]}
-    sink.append(item)
     if smtp is not None:
         from outbox.smtp_log import smtp_send
 
         smtp_send(smtp[0], smtp[1], message_id, draft["to_addr"], draft["body"])
+    sink.append({"message_id": message_id, "to": draft["to_addr"], "body": draft["body"]})
     conn.execute("UPDATE outbox SET state = 'SENT' WHERE draft_id = %s", (draft_id,))
     return fetch_draft(conn, draft_id)
+
+
+def _logged(sent_log: Path | None, message_id: str) -> bool:
+    if sent_log is None or not Path(sent_log).exists():
+        return False
+    from outbox.smtp_log import SmtpLog
+
+    return any(record.get("message_id") == message_id for record in SmtpLog(Path(sent_log)))
 
 
 def fetch_draft(conn, draft_id: str) -> dict:

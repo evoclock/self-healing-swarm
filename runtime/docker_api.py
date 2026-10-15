@@ -29,14 +29,21 @@ def docker_request(method: str, path: str, body: dict | None = None, socket_path
         return response.status, raw.decode(errors="replace")
 
 
-def create_agent_container(name: str, host_repo: str, network: str, env: list[str], socket_path: str = "/var/run/docker.sock") -> str:
+def create_agent_container(
+    name: str,
+    host_repo: str,
+    network: str,
+    env: list[str],
+    socket_path: str = "/var/run/docker.sock",
+    cmd: list[str] | None = None,
+) -> str:
     body = {
         "Image": "swarm-agent",
         "User": "65534:65534",
         "Tty": True,
         "WorkingDir": "/src",
         "Env": env,
-        "Cmd": ["python", "-m", "agent"],
+        "Cmd": cmd or ["python", "-m", "agent"],
         "HostConfig": {
             "NetworkMode": network,
             "ReadonlyRootfs": True,
@@ -71,6 +78,20 @@ def inspect_container(container_id: str, socket_path: str = "/var/run/docker.soc
     if status != 200:
         raise RuntimeError(f"docker inspect {status} {payload}")
     return payload
+
+
+def wait_container(container_id: str, socket_path: str = "/var/run/docker.sock") -> int:
+    status, payload = docker_request("POST", f"/containers/{container_id}/wait", socket_path=socket_path)
+    if status != 200:
+        raise RuntimeError(f"docker wait {status} {payload}")
+    return int(payload["StatusCode"])
+
+
+def container_logs(container_id: str, socket_path: str = "/var/run/docker.sock") -> str:
+    _status, payload = docker_request(
+        "GET", f"/containers/{container_id}/logs?stdout=1&stderr=1&tail=80", socket_path=socket_path
+    )
+    return "" if payload is None else str(payload)
 
 
 def remove_container(container_id: str, socket_path: str = "/var/run/docker.sock") -> None:

@@ -1,10 +1,17 @@
+import secrets
+
 import psycopg
 
+from runtime.policy import RunPolicy
 from runtime.scheduler import transition
 
 
 def connect(database_url: str):
     return psycopg.connect(database_url, autocommit=True)
+
+
+def issue_token() -> str:
+    return secrets.token_urlsafe(32)
 
 
 def reset_run(conn, tenant: str, run_id: str) -> None:
@@ -17,37 +24,48 @@ def reset_run(conn, tenant: str, run_id: str) -> None:
     conn.execute("DELETE FROM runs WHERE id = %s", (run_id,))
 
 
-def open_run(conn, tenant: str, run_id: str, agent_id: str, token: str, source_ip: str) -> None:
+def open_run(conn, tenant: str, run_id: str, agent_id: str, token: str, source_ip: str, policy: RunPolicy) -> None:
+    """Fresh run: wipes the journal. Resume must call bind_token, never this."""
     conn.execute("SELECT set_config('app.tenant_id', %s, false)", (tenant,))
     reset_run(conn, tenant, run_id)
     conn.execute(
         """
-        INSERT INTO runs (id, tenant_id, agent_id, state)
-        VALUES (%s, %s, %s, 'QUEUED')
+        INSERT INTO runs (id, tenant_id, agent_id, state, max_usd, tools, generation)
+        VALUES (%s, %s, %s, 'QUEUED', %s, %s, 0)
         """,
-        (run_id, tenant, agent_id),
+        (run_id, tenant, agent_id, policy.max_usd, sorted(policy.tools)),
     )
     transition("QUEUED", "RUNNING")
     conn.execute("UPDATE runs SET state = 'RUNNING', resume_count = 0 WHERE id = %s", (run_id,))
     conn.execute(
         """
-        INSERT INTO run_tokens (token, tenant_id, run_id, container_ip)
-        VALUES (%s, %s, %s, %s)
+        INSERT INTO run_tokens (token, tenant_id, run_id, container_ip, generation)
+        VALUES (%s, %s, %s, %s, 0)
         """,
         (token, tenant, run_id, source_ip),
     )
 
 
-def bind_token(conn, tenant: str, run_id: str, token: str, source_ip: str) -> None:
-    conn.execute("SELECT set_config('app.tenant_id', %s, false)", (tenant,))
-    conn.execute(
-        """
-        INSERT INTO run_tokens (token, tenant_id, run_id, container_ip)
-        VALUES (%s, %s, %s, %s)
-        ON CONFLICT (token) DO UPDATE SET container_ip = EXCLUDED.container_ip, run_id = EXCLUDED.run_id
-        """,
-        (token, tenant, run_id, source_ip),
-    )
+def bind_token(conn, tenant: str, run_id: str, token: str, source_ip: str) -> int:
+    """Bind a token to a container IP under a new generation. Older tokens for the run stop resolving."""
+    with conn.transaction():
+        conn.execute("SELECT set_config('app.tenant_id', %s, false)", (tenant,))
+        row = conn.execute(
+            "UPDATE runs SET generation = generation + 1 WHERE id = %s RETURNING generation",
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            raise LookupError(run_id)
+        generation = row[0]
+        conn.execute("DELETE FROM run_tokens WHERE run_id = %s", (run_id,))
+        conn.execute(
+            """
+            INSERT INTO run_tokens (token, tenant_id, run_id, container_ip, generation)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (token, tenant, run_id, source_ip, generation),
+        )
+    return generation
 
 
 def run_row(conn, tenant: str, run_id: str) -> dict | None:

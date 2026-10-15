@@ -5,3 +5,6 @@ __pycache__/
 .venv/
 .audit/
 *.egg-info/
+.review/
+docs/review-report.md
+docs/interview-prep.md

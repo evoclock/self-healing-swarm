@@ -5,6 +5,7 @@ from pathlib import Path
 from agent.client import ProxyClient
 from agent.runner import execute
 from runtime.config import load_agent
+from runtime.policy import RunPolicy
 from runtime.runs import connect, open_run
 
 
@@ -20,16 +21,18 @@ def main() -> int:
         run_id = f"record-{agent_id}"
         token = f"token-{run_id}"
         client = ProxyClient(proxy_url, token)
-        open_run(conn, tenant, run_id, agent_id, token, client.whoami())
-        result = execute(client, load_agent(Path(config_path)), run_id, scenario)
+        config = load_agent(Path(config_path))
+        open_run(conn, tenant, run_id, agent_id, token, client.whoami(), RunPolicy.from_config(config))
+        result = execute(client, config, run_id, scenario)
         print(f"{scenario} {result.get('state')}", flush=True)
         if result.get("state") not in ("SUCCEEDED", "STOPPED_BUDGET", "STOPPED_LOOP"):
             print(result, flush=True)
             return 1
     probe = ProxyClient(proxy_url, "token-record-loop")
-    open_run(conn, "t-a", "record-loop", "daily-brief", "token-record-loop", probe.whoami())
-    looped = probe.complete([{"role": "user", "content": "loop probe"}], "primary", 1, 1.0)
-    local = probe.complete([{"role": "user", "content": "Reply with the single word pong."}], "local", 2, 1.0)
+    brief = RunPolicy.from_config(load_agent(Path("agents/t-a/daily_brief.yaml")))
+    open_run(conn, "t-a", "record-loop", "daily-brief", "token-record-loop", probe.whoami(), brief)
+    looped = probe.complete([{"role": "user", "content": "loop probe"}], "primary", 1)
+    local = probe.complete([{"role": "user", "content": "Reply with the single word pong."}], "local", 2)
     print(f"loop {looped.get('status')} local {local.get('text')}", flush=True)
     if local.get("status") != 200:
         print(local, flush=True)

@@ -5,6 +5,9 @@ import urllib.request
 
 
 class ProxyClient:
+    # 0.5 s per poll. Longer than the proxy's 30 s takeover so a dead holder is replaced, not waited on forever.
+    poll_limit = 180
+
     def __init__(self, base_url: str, token: str):
         self.base_url = base_url.rstrip("/")
         self.token = token
@@ -22,7 +25,8 @@ class ProxyClient:
             {"token": self.token, "name": name, "args": args, "step_no": step_no},
         )
 
-    def complete(self, messages, model: str, step_no: int, max_usd: float, spent_usd: float = 0) -> dict:
+    def complete(self, messages, model: str, step_no: int) -> dict:
+        """No budget fields. The proxy reads the cap from the run and estimates the cost itself."""
         return self._retry(
             "POST",
             "/v1/complete",
@@ -32,8 +36,6 @@ class ProxyClient:
                 "tools": [],
                 "model": model,
                 "step_no": step_no,
-                "max_usd": max_usd,
-                "spent_usd": spent_usd,
             },
         )
 
@@ -61,11 +63,18 @@ class ProxyClient:
         return body
 
     def _retry(self, method: str, path: str, payload: dict) -> dict:
+        """Wait out 403 while the token binds, and poll 202 while another caller holds the step."""
         body = {"error": "token"}
         status = 403
-        for _ in range(60):
+        unbound = 0
+        waiting = 0
+        while unbound < 60 and waiting < self.poll_limit:
             status, body = self._send(method, path, payload)
-            if status != 403:
+            if status == 403:
+                unbound += 1
+            elif status == 202:
+                waiting += 1
+            else:
                 break
             time.sleep(0.5)
         body["status"] = status
