@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {"title": "Multi-tenant background agent runtime", "locale": "en", "output": ".archify/architecture-agent-runtime-20261015-033252/agent-runtime.html", "quality_profile": "showcase"},
+  "components": [
+    {"id":"config","type":"frontend","label":"Agent config","sublabel":"deadline, models, limits","pos":[30,170],"size":[160,68]},
+    {"id":"person","type":"external","label":"Person","sublabel":"takes over","pos":[30,330],"size":[160,68]},
+    {"id":"approver","type":"external","label":"Approver","sublabel":"same tenant","pos":[30,470],"size":[160,68]},
+    {"id":"scheduler","type":"backend","label":"Scheduler","sublabel":"EDF, leases","pos":[300,170],"size":[150,68]},
+    {"id":"container","type":"security","label":"Run container","sublabel":"fresh, run token only","pos":[580,160],"size":[160,88]},
+    {"id":"proxy","type":"security","label":"Egress proxy x2","sublabel":"key, budget, journal","pos":[880,160],"size":[170,88]},
+    {"id":"cloud","type":"external","label":"Cloud model","sublabel":"rate limited, first","pos":[700,20],"size":[170,64]},
+    {"id":"local","type":"external","label":"Local model","sublabel":"fallback, batch slots","pos":[960,20],"size":[170,64]},
+    {"id":"mail","type":"backend","label":"Synthetic service","sublabel":"connector interface","pos":[580,330],"size":[160,68]},
+    {"id":"postgres","type":"database","label":"Postgres 16","sublabel":"journal, outbox, forced RLS","pos":[880,330],"size":[180,68]},
+    {"id":"recorded","type":"database","label":"Recorded calls","sublabel":"make drill replay","pos":[1080,470],"size":[150,68]},
+    {"id":"send","type":"backend","label":"send","sublabel":"separate action","pos":[300,470],"size":[150,68]},
+    {"id":"evals","type":"backend","label":"evals run","sublabel":"eval gate","pos":[580,470],"size":[150,68]}
+  ],
+  "boundaries": [
+    {"kind":"region","label":"Single host, Docker","wraps":["scheduler","container","proxy","mail","postgres","recorded","send","evals"]},
+    {"kind":"security-group","label":"Proxy is the only peer","wraps":["container"]}
+  ],
+  "connections": [
+    {"id":"c1","from":"config","to":"scheduler","label":"deadline"},
+    {"id":"c2","from":"scheduler","to":"container","label":"start, resume","variant":"emphasis"},
+    {"id":"c3","from":"scheduler","to":"person","label":"escalate","variant":"security"},
+    {"id":"c4","from":"container","to":"proxy","label":"run token","variant":"emphasis"},
+    {"id":"c5","from":"proxy","to":"cloud","label":"real key","variant":"security"},
+    {"id":"c6","from":"proxy","to":"local","label":"fallback","variant":"dashed"},
+    {"id":"c7","from":"proxy","to":"mail","label":"tenant scope","variant":"security"},
+    {"id":"c8","from":"proxy","to":"postgres","label":"STARTED, COMPLETED"},
+    {"id":"c9","from":"proxy","to":"recorded","label":"drill replay","variant":"dashed"},
+    {"id":"c10","from":"approver","to":"send","label":"approves","variant":"security"},
+    {"id":"c11","from":"send","to":"postgres","label":"SENDING to SENT"},
+    {"id":"c12","from":"evals","to":"postgres","label":"eval_record"}
+  ],
+  "cards": [
+    {"dot":"cyan","title":"Scheduling 200 agents","items":["Earliest deadline first: 200 briefs due 07:30 spread over 90 min","Provider: requests and tokens per minute; wait or switch model","Tenant: concurrency limit per tenant","Host: 8 containers, 0.5 CPU and 512 MB each","429: backoff with jitter, then local model; quota split across tenants","Predicted missed deadline escalates to a person"]},
+    {"dot":"rose","title":"Sandbox","items":["Regular user, read-only filesystem, 64 MB scratch disk","No extra capabilities or privilege escalation, default seccomp","Process, CPU and memory limits; py.exec as a subprocess","Run token is tied to the container IP and is not a credential","Cross-tenant read, CONNECT tunnel, direct model call: policy_denied"]},
+    {"dot":"emerald","title":"Failure and resume","items":["Step key: run_id, step_no, hash of messages and tool args","STARTED before the call, COMPLETED or FAILED before the reply","SUCCEEDED only with an artifact citing own-tenant message IDs","Auto-resume: new container, same run_id, skips completed steps","Rerun a step that died STARTED and log cost_uncertain","Hand to a person: STOPPED_LOOP, STOPPED_BUDGET, 3 resumes, all models down, third denial"]},
+    {"dot":"amber","title":"Tenants, evals, memory","items":["One membership per user: viewer, approver or admin","Proxy tenant scope plus Postgres RLS; unscoped query returns no rows","Evals: 20+ recorded cases, hard checks, temperature-0 judge, drop of 0.3 or less","Memory: cursor, facts, run summaries as quoted data; cursor moves on SUCCEEDED","Panel (design only): three models, two rounds, minority view kept"]},
+    {"dot":"violet","title":"Drafts and approval","items":["Agents write drafts and cannot send","send needs an approver in the same tenant","Message-ID from the draft ID, so a replay never sends twice","External or attached drafts are flagged and need their own approval"]},
+    {"dot":"slate","title":"Not building, and hardening","items":["Not built: live connectors, web UI, OIDC, replica, multi-host, panel","Shared kernel: no gVisor or microVMs; a kernel exploit could reach other tenants","Weakest part: the proxy holds every credential, tenant map and budget","1 Detect leaks: canary IDs and a fuzzer","2 Firecracker microVM per run from a warm pool","3 Vault and broker: five-minute, one-tenant tokens","4 Gateway, broker, ledger over mutual TLS, failing closed","5 Synchronous Postgres replica and lease fences"]}
+  ]
+}
