@@ -2,7 +2,7 @@ This repo runs multi-tenant background agents. Each run is a locked container. T
 
 ## System design
 
-Open [docs/system-design.html](docs/system-design.html) in a browser. It is the architecture diagram: components, trust boundaries, and the notes for scheduling, sandbox, failure, tenants, drafts, and what is not built. The file is self-contained.
+[Open the interactive system design](https://evoclock.github.io/fieldnotes/system-design.html). It covers the architecture, trust boundaries, scheduling, sandbox, failure handling, tenants, and drafts.
 
 The picture has three moving parts.
 
@@ -30,7 +30,7 @@ A passing run prints PASS for proxies, kill, provider, injection, escape, budget
 
 Docker and make.
 
-`make record` also needs the merge gateway key in the macOS login keychain, service MERGE_GATEWAY_API_KEY, account merge-gateway, and a local model at http://127.0.0.1:18894/v1 that advertises GLM-5.3-Flash-EXL3-TF-FNC7. The key is passed only into the proxy process. The agent container does not receive it.
+`make record` also needs the merge gateway key in the macOS login keychain, service `MERGE_GATEWAY_API_KEY`, account `merge-gateway`, and a local model endpoint reachable by the proxy over the configured network that advertises GLM 5.3 Flash. The key is passed only into the proxy process. The agent container does not receive it.
 
 `make capture` records the eval cases against that local model. `make evals` scores a recorded candidate offline.
 
@@ -54,20 +54,15 @@ Hard checks are code. A cited id must belong to the case. An external draft must
 
 A brand new prompt has no recording. The gate cannot score it offline. Run `make capture` once, with the local model up, before expecting `make evals` to judge it.
 
-## Panel
+## What I would add with more time
 
-The panel is design only. Three models from three providers would answer through the proxy, first blind, then two rounds of challenging specific claims. A claim would survive only with cited evidence. The parent answer would list agreed claims, contested claims with the evidence that settled them, and any minority view. A unanimous claim with no evidence would be marked weak. That path is not built.
+To harden and complete the system, I would:
 
-## Gaps
-
-Live mailbox connectors, a web UI, OIDC, a Postgres replica, multi-host scheduling, gVisor, and Firecracker are not built. Ordinary containers share the host kernel.
-
-The proxy still holds the long-lived provider key. There is no vault, no five-minute token broker, and no mutual TLS split between gateway, broker, and ledger.
-
-The daily brief lists the tenant's mail and then writes the cursor. It does not yet skip mail older than the cursor on the next run. Facts are flagged when the text looks like an instruction, and a fact must cite a message in the tenant. Facts do not expire, and there is no write size cap.
-
-The send path is a small SMTP listener that appends one JSON line per accepted message. It is not an external mail server. A second deliver of the same draft does not send again.
-
-The eval judge is the local model, not the gateway model. Gateway recordings cover the sample agent runs used by the drill. Day cases that are not rows in the mailbox carry a short synthetic message so the case still has an email body. The document cases other than the real budget sheet carry a generated CSV with the expected total.
-
-`docs/plan.md` is the build plan and is not part of the drill output.
+- **Sandboxing:** Replace ordinary containers with gVisor or Firecracker so tenant workloads do not share the host kernel.
+- **Credentials and service identity:** Move the long-lived provider key out of the proxy into a vault, issue short-lived tokens through a broker, and use mutual TLS between the gateway, broker, and ledger.
+- **Availability and scale:** Add a Postgres replica and multi-host scheduling.
+- **Identity and integrations:** Add OIDC, live mailbox connectors, and a web UI.
+- **Memory limits:** Make runs skip mail older than the saved cursor, expire facts, and cap their size.
+- **Delivery:** Replace the append-only SMTP sink with an external mail service while keeping same-tenant approval and idempotent delivery.
+- **Evaluation coverage:** Validate the local judge against known cases and expand gateway recordings beyond the sample agent runs. Cases without mailbox rows or a real budget sheet currently use synthetic messages or generated CSVs.
+- **Evidence review:** Build a review panel in which three models from different providers answer independently, then challenge specific claims. Keep claims only when they have cited evidence; report agreement, contested claims, and minority views. Treat unanimity without evidence as weak.
