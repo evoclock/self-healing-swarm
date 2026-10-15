@@ -1,0 +1,15 @@
+name: evals
+
+on:
+  pull_request:
+    paths:
+      - "agents/**"
+      - "evals/**"
+      - "recordings/evals/**"
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make evals

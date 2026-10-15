@@ -1,0 +1,24 @@
+{
+  "id": "brief-06-day",
+  "tenant": "t-a",
+  "domains": [
+    "a.example"
+  ],
+  "own_ids": [
+    "m-a-day-6"
+  ],
+  "injection": false,
+  "escape": false,
+  "expected_total": null,
+  "mailbox": [
+    {
+      "id": "m-a-day-6",
+      "tenant_id": "t-a",
+      "from_addr": "ada@a.example",
+      "to_addr": "team@a.example",
+      "subject": "Day 6 update",
+      "body": "Day 6 notes for t-a. No action required beyond the brief.",
+      "attachment_id": null
+    }
+  ]
+}
