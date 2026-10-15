@@ -1,0 +1,146 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: migrator
+      POSTGRES_PASSWORD: migrator
+      POSTGRES_DB: swarm
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U migrator -d swarm"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  migrate:
+    image: postgres:16
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: migrator
+      PGHOST: postgres
+      PGUSER: migrator
+      PGDATABASE: swarm
+    volumes:
+      - ./migrations:/migrations:ro
+    entrypoint: ["bash", "/migrations/apply.sh"]
+
+  test:
+    image: python:3.12-slim
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://app:app@postgres:5432/swarm
+      PYTHONPATH: /src
+    volumes:
+      - .:/src:ro
+    working_dir: /src
+    command: ["bash", "-c", "pip install -q 'psycopg[binary]' pytest pyyaml && pytest -p no:cacheprovider -v -s tests"]
+
+  proxy-a:
+    image: python:3.12-slim
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: &proxy_env
+      DATABASE_URL: postgresql://app:app@postgres:5432/swarm
+      PYTHONPATH: /src
+      PORT: "18894"
+      PROXY_NAME: proxy-a
+      PROXY_MODE: ${PROXY_MODE:-replay}
+      PROVIDER_KEY: ${PROVIDER_KEY:-}
+      RECORDINGS_DIR: /src/recordings/steps
+      LOCAL_BASE_URL: http://host.docker.internal:18894/v1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - .:/src
+    working_dir: /src
+    command: ["bash", "-c", "pip install -q 'psycopg[binary]' pyyaml openai && python -m proxy"]
+    networks:
+      - default
+      - agents
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18894/health')"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+      start_period: 90s
+
+  proxy-b:
+    image: python:3.12-slim
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *proxy_env
+      PROXY_NAME: proxy-b
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - .:/src
+    working_dir: /src
+    command: ["bash", "-c", "pip install -q 'psycopg[binary]' pyyaml openai && python -m proxy"]
+    networks:
+      - default
+      - agents
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18894/health')"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+      start_period: 90s
+
+  record:
+    image: python:3.12-slim
+    profiles: ["tools"]
+    depends_on:
+      proxy-a:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://app:app@postgres:5432/swarm
+      PYTHONPATH: /src
+      PROXY_A_URL: http://proxy-a:18894
+      LOCAL_BASE_URL: http://host.docker.internal:18894/v1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - .:/src
+    working_dir: /src
+    networks:
+      - default
+    command: ["bash", "-c", "pip install -q 'psycopg[binary]' pyyaml openai && python -m agent.record"]
+
+  drill:
+    image: python:3.12-slim
+    profiles: ["tools"]
+    depends_on:
+      proxy-a:
+        condition: service_healthy
+      proxy-b:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://app:app@postgres:5432/swarm
+      PYTHONPATH: /src
+      PROXY_A_URL: http://proxy-a:18894
+      PROXY_B_URL: http://proxy-b:18894
+      AGENT_NETWORK: swarm-agents
+      HOST_REPO: ${HOST_REPO}
+    volumes:
+      - .:/src
+      - /var/run/docker.sock:/var/run/docker.sock
+    working_dir: /src
+    networks:
+      - default
+    command: ["bash", "-c", "pip install -q 'psycopg[binary]' pyyaml && python -m drill"]
+
+networks:
+  agents:
+    name: swarm-agents
+    internal: true
+
+volumes:
+  pgdata:

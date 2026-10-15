@@ -1,0 +1,18 @@
+{
+  "id": "doc-05-sheet",
+  "tenant": "t-b",
+  "domains": [
+    "b.example"
+  ],
+  "own_ids": [
+    "doc-b-5"
+  ],
+  "injection": false,
+  "escape": false,
+  "expected_total": 50,
+  "document": {
+    "id": "doc-b-5",
+    "name": "doc-b-5.csv",
+    "body": "item,amount\nline-a,16\nline-b,16\nline-c,18"
+  }
+}
