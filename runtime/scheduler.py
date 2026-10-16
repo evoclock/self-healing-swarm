@@ -56,7 +56,7 @@ class Placement:
     tenant_id: str
     start: int
     escalated: bool
-    duration: int = 0
+    duration: int
 
 
 def load_config(config, promoted: set[str]):

@@ -1,13 +1,15 @@
 import json
-import os
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from decimal import Decimal
 
 import psycopg
 
 from proxy.app import finish_step, resolve
+from runtime.runs import LEASE_SECONDS
 from proxy.gate import Bound, Finished, admit_tool, claim_step, finish_state, load_bound, write_event
-from proxy.providers import Cassette, KNOWN_MODELS, Provider, ReplayMiss, live_estimate, merge_trace_headers, recorded_cost, step_digest
+from proxy.providers import Cassette, KNOWN_MODELS, Provider, ReplayMiss, UnknownPrice, live_estimate, merge_trace_headers, recorded_cost, step_digest
 
 
 @dataclass
@@ -19,6 +21,7 @@ class ProxyContext:
     upstream: object | None = None
     faults: list = field(default_factory=list)
     parents: dict = field(default_factory=dict)
+    heartbeat_s: float = LEASE_SECONDS / 3
 
 
 def dispatch(ctx: ProxyContext, method: str, path: str, raw: bytes, source_ip: str) -> tuple[int, dict]:
@@ -73,7 +76,11 @@ def complete(ctx: ProxyContext, conn, payload: dict, source_ip: str) -> tuple[in
         charge = recorded_cost(ctx.cassette, digest) or Decimal(0)
     else:
         # Live: reserve an upper bound before the call. finish_step replaces it with the returned usage.cost.
-        charge = live_estimate(messages, tools, model)
+        try:
+            charge = live_estimate(messages, tools, model)
+        except UnknownPrice as exc:
+            _note(ctx, f"complete 400 trace {tenant}.{run_id} no_price {exc.model}")
+            return 400, {"error": "no_price", "model": exc.model}
     step_no = int(payload["step_no"])
     claimed = claim_step(conn, bound, step_no, digest, model, charge)
     if isinstance(claimed, Finished):
@@ -84,7 +91,8 @@ def complete(ctx: ProxyContext, conn, payload: dict, source_ip: str) -> tuple[in
         parent = ctx.parents.get((tenant, run_id))
         trace = merge_trace_headers(tenant, run_id, step_no, model, parent)
     try:
-        completion = _provider(ctx).complete(messages, tools, model, project_id=bound.project_id, trace=trace)
+        with heartbeat(ctx, bound):
+            completion = _provider(ctx).complete(messages, tools, model, project_id=bound.project_id, trace=trace)
     except ReplayMiss as exc:
         finish_step(conn, tenant, run_id, step_no, digest, "FAILED", {"error": "replay_miss"}, claimed.claim)
         _note(ctx, _complete_line(409, tenant, run_id, step_no, model, {"error": "replay_miss"}, charge))
@@ -120,7 +128,8 @@ def tool(ctx: ProxyContext, conn, payload: dict, source_ip: str) -> tuple[int, d
     args = payload.get("args") or {}
     step_no = int(payload["step_no"])
     digest = step_digest([{"tool": name, "args": args}], [])
-    finished = admit_tool(conn, bound, name, args, step_no, digest)
+    with heartbeat(ctx, bound):
+        finished = admit_tool(conn, bound, name, args, step_no, digest)
     mark = finished.body.get("error") or finished.body.get("reason") or "ok"
     _note(ctx, f"tool {finished.status} trace {bound.tenant_id}.{bound.run_id} step {step_no} {name} {mark}")
     return finished.status, finished.body
@@ -158,7 +167,24 @@ def _bound(conn, payload: dict, source_ip: str) -> Bound | None:
     return bound
 
 
-LEASE_SECONDS = int(os.environ.get("PROXY_LEASE_S", "15"))
+@contextmanager
+def heartbeat(ctx: ProxyContext, bound: Bound):
+    """Renew the lease on its own connection while a provider or tool call is in flight."""
+    stop = threading.Event()
+
+    def beat():
+        with psycopg.connect(ctx.database_url, autocommit=True) as conn:
+            conn.execute("SELECT set_config('app.tenant_id', %s, false)", (bound.tenant_id,))
+            while not stop.wait(ctx.heartbeat_s):
+                renew_lease(conn, bound)
+
+    thread = threading.Thread(target=beat, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join()
 
 
 def renew_lease(conn, bound: Bound) -> None:

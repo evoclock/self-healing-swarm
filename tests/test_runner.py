@@ -5,6 +5,7 @@ from agent.loop import after_provider_pressure
 from agent.prompts import external_recipient
 from agent.runner import execute
 from agent.tools import SHEET_PROGRAM
+from proxy.providers import OUTPUT_CAP
 from runtime.citations import parse_cites
 from runtime.config import AgentConfig, Limits
 
@@ -220,17 +221,32 @@ class Flaky(Fake):
         return super().tool(name, args, step)
 
 
-def test_tool_error_is_retried_and_the_run_recovers():
+def test_tool_error_is_retried_with_backoff_and_the_run_recovers():
     fake = Flaky(2)
-    result = execute(fake, config(), "r-tool", "brief")
+    slept = []
+    result = execute(fake, config(), "r-tool", "brief", sleep=slept.append)
     assert result["state"] == "SUCCEEDED"
+    assert slept == [0.5, 1.0]
     assert [name for name, _ in fake.tools].count("mail.list") == 3
     assert fake.events.count("tool_retry") == 2
 
 
 def test_tool_error_after_three_retries_goes_back_to_the_model():
     fake = Flaky(10)
-    execute(fake, config(), "r-tool-model", "brief")
+    execute(fake, config(), "r-tool-model", "brief", sleep=lambda _s: None)
     assert [name for name, _ in fake.tools].count("mail.list") == 4
     assert "tool_error_to_model" in fake.events
     assert fake.prompts, "the model still gets the call, with the error in view"
+
+
+def test_token_precheck_counts_the_prompt_as_well_as_the_output_cap():
+    fake = Fake([])
+    result = execute(fake, limited(max_tokens=OUTPUT_CAP + 5), "r-prompt", "brief")
+    assert result["state"] == "STOPPED_BUDGET" and fake.prompts == []
+
+
+def test_tool_retries_count_as_steps():
+    fake = Flaky(10)
+    result = execute(fake, limited(max_steps=3), "r-retry-steps", "brief", sleep=lambda _s: None)
+    assert result["state"] == "STOPPED_BUDGET"
+    assert len(fake.tools) == 3

@@ -1,11 +1,13 @@
 import json
 import os
 import threading
+import time
 from decimal import Decimal
 
 import psycopg
 
 import proxy.gate
+import proxy.providers
 import proxy.service
 from proxy.app import begin_step, finish_step, resolve
 from proxy.providers import Cassette, Completion, Provider, step_digest
@@ -366,3 +368,35 @@ def test_each_proxy_request_renews_the_run_lease(tmp_path):
         conn.execute("UPDATE runs SET lease_until = now() - interval '1 hour' WHERE id = 'gate-lease'")
     post(context(tmp_path), "/v1/tool", {"token": token, "name": "mail.list", "args": {}, "step_no": 1})
     assert query("t-a", "SELECT lease_until > now() FROM runs WHERE id = 'gate-lease'") == [(True,)]
+
+
+def test_a_live_model_without_a_price_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setattr(proxy.providers, "PRICE_PER_TOKEN", {})
+    token = opened("gate-no-price")
+    upstream = Upstream()
+    status, body = post(live(tmp_path, upstream), "/v1/complete", {
+        "token": token, "messages": [{"role": "user", "content": "x"}], "model": "primary", "step_no": 1,
+    })
+    assert status == 400 and body["error"] == "no_price"
+    assert upstream.calls == 0
+
+
+def test_the_lease_is_renewed_while_a_provider_call_is_in_flight(tmp_path):
+    token = opened("gate-heartbeat")
+    seen = []
+
+    def slow(messages, tools, model, **kwargs):
+        with psycopg.connect(URL, autocommit=True) as conn:
+            conn.execute("SELECT set_config('app.tenant_id', 't-a', false)")
+            conn.execute("UPDATE runs SET lease_until = now() - interval '1 hour' WHERE id = 'gate-heartbeat'")
+            time.sleep(0.4)
+            seen.append(conn.execute("SELECT lease_until > now() FROM runs WHERE id = 'gate-heartbeat'").fetchone()[0])
+        return Completion("live", 1, 1, Decimal("0.000001"))
+
+    ctx = live(tmp_path, slow)
+    ctx.heartbeat_s = 0.05
+    status, _body = post(ctx, "/v1/complete", {
+        "token": token, "messages": [{"role": "user", "content": "slow"}], "model": "primary", "step_no": 1,
+    })
+    assert status == 200
+    assert seen == [True]

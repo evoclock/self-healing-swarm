@@ -25,7 +25,7 @@ from runtime.docker_api import (
     wait_container,
 )
 from runtime.policy import RunPolicy
-from runtime.runs import bind_token, connect, events, open_run, reset_run, run_row, step_costs
+from runtime.runs import bind_token, connect, events, open_run, record_container, reset_run, run_row, step_costs
 from runtime.scheduler import load_config
 from runtime.watcher import resume_in_container, watch_once
 
@@ -85,8 +85,9 @@ def scenario_kill() -> tuple[bool, str]:
     run_id = "drill-kill"
     token = "drill-kill-token"
     conn = connect(os.environ["DATABASE_URL"])
-    open_run(conn, "t-a", run_id, "daily-brief", token, "10.255.255.1", _policy(BRIEF))
+    open_run(conn, "t-a", run_id, "daily-brief", token, "10.255.255.1", _policy(BRIEF), BRIEF, "brief")
     first = _start_agent(host_repo, network, token, run_id, BRIEF, "brief", pause=True)
+    record_container(conn, "t-a", run_id, first)
     try:
         ip = container_ip(inspect_container(first), network)
         bind_token(conn, "t-a", run_id, token, ip)
@@ -141,9 +142,6 @@ def scenario_injection() -> tuple[bool, str]:
     cursor = conn.execute(
         "SELECT body FROM memory WHERE run_id = 'drill-injection' AND kind = 'cursor'"
     ).fetchall()
-    conn.execute(
-        "INSERT INTO memberships (tenant_id, user_id, role) VALUES ('t-a', 'approver-a', 'approver') ON CONFLICT DO NOTHING"
-    )
     try:
         approve(conn, "t-a", "drill-injection:injection", "approver-a")
         held = False
@@ -327,9 +325,10 @@ def run_locked(
     network = os.environ["AGENT_NETWORK"]
     conn = connect(os.environ["DATABASE_URL"])
     token = f"token-{run_id}"
-    open_run(conn, tenant, run_id, agent_id, token, "10.255.255.1", policy)
+    open_run(conn, tenant, run_id, agent_id, token, "10.255.255.1", policy, config_path, scenario)
     ProxyClient(os.environ["PROXY_A_URL"], "").faults(list(faults or []))
     cid = _start_agent(os.environ["HOST_REPO"], network, token, run_id, config_path, scenario, pause=False)
+    record_container(conn, tenant, run_id, cid)
     try:
         bind_token(conn, tenant, run_id, token, container_ip(inspect_container(cid), network))
         _wait_state(conn, tenant, run_id, TERMINAL)

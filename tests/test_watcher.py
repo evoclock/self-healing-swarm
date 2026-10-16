@@ -1,4 +1,5 @@
 import os
+import threading
 from decimal import Decimal
 
 import psycopg
@@ -51,3 +52,27 @@ def test_the_third_expiry_escalates_instead_of_resuming():
             watch_once(conn, lambda tenant, run_id: resumed.append(run_id))
     assert resumed.count("watch-esc") == 2
     assert state("watch-esc") == ("ESCALATED", 3)
+
+
+def test_two_watchers_on_one_expired_run_resume_it_exactly_once():
+    opened("watch-race")
+    expire("watch-race")
+    resumed = []
+    barrier = threading.Barrier(2)
+
+    def watcher():
+        with psycopg.connect(URL, autocommit=True) as conn:
+            barrier.wait()
+            watch_once(conn, lambda tenant, run_id: resumed.append(run_id), only={"watch-race"})
+
+    threads = [threading.Thread(target=watcher) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert resumed == ["watch-race"]
+    assert state("watch-race") == ("RUNNING", 1)
+    with psycopg.connect(URL, autocommit=True) as conn:
+        conn.execute("SELECT set_config('app.tenant_id', 't-a', false)")
+        events = conn.execute("SELECT event FROM run_events WHERE run_id = 'watch-race'").fetchall()
+    assert events == [("lease_resumed",)]
