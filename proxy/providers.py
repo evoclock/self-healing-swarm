@@ -15,6 +15,18 @@ GATEWAY_MODELS = {
 }
 
 
+# Dollars per token, input or output, for the pre-call estimate of a live call. Set at or above the recorded
+# usage.cost per output token (0.00005844 for 231 output tokens), so the estimate does not undercount.
+PRICE_PER_TOKEN = {"primary": Decimal("0.00000026"), "local": Decimal(0)}
+
+
+def live_estimate(messages, tools, model: str, max_tokens: int = OUTPUT_CAP) -> Decimal:
+    """Upper bound for one live call: prompt tokens (about 4 characters each) plus max_tokens, at the model price."""
+    prompt_chars = len(json.dumps({"messages": messages, "tools": tools}))
+    prompt_tokens = -(-prompt_chars // 4)
+    return (prompt_tokens + max_tokens) * PRICE_PER_TOKEN.get(model, max(PRICE_PER_TOKEN.values()))
+
+
 class ReplayMiss(Exception):
     def __init__(self, digest: str):
         self.digest = digest

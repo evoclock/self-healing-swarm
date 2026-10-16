@@ -9,6 +9,14 @@ class ApproverRefused(Exception):
         super().__init__("approver_refused")
 
 
+class FlaggedNeedsReview(Exception):
+    """A flagged draft is not approved by the ordinary approval. It needs approve_flagged."""
+
+    def __init__(self, reasons):
+        self.reasons = list(reasons)
+        super().__init__("flagged_needs_review: " + ",".join(self.reasons))
+
+
 def flag_reasons(to_addr: str, domains: tuple[str, ...], attachments: tuple) -> tuple[str, ...]:
     reasons = []
     domain = to_addr.rsplit("@", 1)[-1]
@@ -54,6 +62,15 @@ def create_draft(conn, tenant: str, draft_id: str, to_addr: str, subject: str, b
 
 
 def approve(conn, tenant: str, draft_id: str, approver_user: str) -> dict:
+    return _approve(conn, tenant, draft_id, approver_user, flagged_ok=False)
+
+
+def approve_flagged(conn, tenant: str, draft_id: str, approver_user: str) -> dict:
+    """The separate, explicit approval for a draft that leaves the tenant's domains or carries attachments."""
+    return _approve(conn, tenant, draft_id, approver_user, flagged_ok=True)
+
+
+def _approve(conn, tenant: str, draft_id: str, approver_user: str, flagged_ok: bool) -> dict:
     conn.execute("SELECT set_config('app.tenant_id', %s, false)", (tenant,))
     role = conn.execute(
         "SELECT role FROM memberships WHERE tenant_id = %s AND user_id = %s",
@@ -61,6 +78,9 @@ def approve(conn, tenant: str, draft_id: str, approver_user: str) -> dict:
     ).fetchone()
     if role is None or role[0] != "approver":
         raise ApproverRefused()
+    draft = fetch_draft(conn, draft_id)
+    if draft["flagged"] and not flagged_ok:
+        raise FlaggedNeedsReview(draft["flag_reasons"])
     conn.execute(
         "UPDATE outbox SET state = 'APPROVED' WHERE draft_id = %s AND state = 'DRAFT'",
         (draft_id,),

@@ -1,4 +1,5 @@
 import json
+import os
 from dataclasses import dataclass, field
 from decimal import Decimal
 
@@ -6,7 +7,7 @@ import psycopg
 
 from proxy.app import finish_step, resolve
 from proxy.gate import Bound, Finished, admit_tool, claim_step, finish_state, load_bound, write_event
-from proxy.providers import Cassette, KNOWN_MODELS, Provider, ReplayMiss, merge_trace_headers, recorded_cost, step_digest
+from proxy.providers import Cassette, KNOWN_MODELS, Provider, ReplayMiss, live_estimate, merge_trace_headers, recorded_cost, step_digest
 
 
 @dataclass
@@ -66,10 +67,13 @@ def complete(ctx: ProxyContext, conn, payload: dict, source_ip: str) -> tuple[in
     messages = payload.get("messages") or []
     tools = payload.get("tools") or []
     digest = step_digest(messages, tools)
-    if model == "local" or ctx.mode != "replay":
+    if model == "local":
         charge = Decimal(0)
-    else:
+    elif ctx.mode == "replay":
         charge = recorded_cost(ctx.cassette, digest) or Decimal(0)
+    else:
+        # Live: reserve an upper bound before the call. finish_step replaces it with the returned usage.cost.
+        charge = live_estimate(messages, tools, model)
     step_no = int(payload["step_no"])
     claimed = claim_step(conn, bound, step_no, digest, model, charge)
     if isinstance(claimed, Finished):
@@ -148,7 +152,21 @@ def _bound(conn, payload: dict, source_ip: str) -> Bound | None:
     found = resolve(conn, payload.get("token") or "", source_ip)
     if found is None:
         return None
-    return load_bound(conn, found)
+    bound = load_bound(conn, found)
+    if bound is not None:
+        renew_lease(conn, bound)
+    return bound
+
+
+LEASE_SECONDS = int(os.environ.get("PROXY_LEASE_S", "15"))
+
+
+def renew_lease(conn, bound: Bound) -> None:
+    """Every authenticated request is a heartbeat. The watcher resumes a run whose lease runs out."""
+    conn.execute(
+        "UPDATE runs SET lease_until = now() + make_interval(secs => %s) WHERE id = %s AND state = 'RUNNING'",
+        (LEASE_SECONDS, bound.run_id),
+    )
 
 
 def _provider(ctx: ProxyContext) -> Provider:

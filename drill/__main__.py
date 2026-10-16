@@ -8,10 +8,9 @@ from decimal import Decimal
 from pathlib import Path
 
 from agent.client import ProxyClient
-from agent.runner import execute
 from evals.gate import config_hash, gate, load_golden, load_recordings
 from evals.store import promoted_hashes, write_eval_record
-from outbox.send import approve, create_draft, deliver
+from outbox.send import FlaggedNeedsReview, approve, create_draft, deliver
 from outbox.smtp_log import serve_smtp
 from proxy.providers import step_digest
 from runtime.config import load_agent
@@ -27,9 +26,11 @@ from runtime.docker_api import (
 )
 from runtime.policy import RunPolicy
 from runtime.runs import bind_token, connect, events, open_run, reset_run, run_row, step_costs
-from runtime.scheduler import load_config, on_lease_expired
+from runtime.scheduler import load_config
+from runtime.watcher import resume_in_container, watch_once
 
 BRIEF = "agents/t-a/daily_brief.yaml"
+DOC = "agents/t-b/doc_analyst.yaml"
 TERMINAL = ("SUCCEEDED", "FAILED", "STOPPED_LOOP", "STOPPED_BUDGET", "ESCALATED")
 
 
@@ -52,6 +53,7 @@ def main() -> int:
         ("budget", scenario_budget),
         ("hang", scenario_hang),
         ("loop", scenario_loop),
+        ("document", scenario_document),
         ("eval_gate", scenario_eval),
         ("empty", scenario_empty),
         ("send", scenario_send),
@@ -92,18 +94,19 @@ def scenario_kill() -> tuple[bool, str]:
             return False, "step 2 did not complete\n" + container_logs(first)
         before = step_costs(conn, "t-a", run_id)
         kill_container(first)
-        state, count = on_lease_expired(0)
-        conn.execute("SELECT set_config('app.tenant_id', 't-a', false)")
-        conn.execute(
-            "UPDATE runs SET state = %s, resume_count = %s WHERE id = %s",
-            (state, count, run_id),
-        )
-        # Resume binds a new token under a new generation. It does not call open_run, which would wipe the journal.
-        token_2 = "drill-kill-token-2"
-        second = _start_agent(host_repo, network, token_2, run_id, BRIEF, "brief", pause=False, suffix="-2")
+        # The lease watcher notices the lapsed lease and starts a fresh container under a new token generation.
+        # It never calls open_run, which would wipe the journal.
+        started: list[str] = []
+        for _ in range(60):
+            watch_once(conn, lambda tenant, rid: started.append(resume_in_container(conn, tenant, rid)), only={run_id})
+            if started:
+                break
+            time.sleep(1)
+        if not started:
+            return False, "watcher did not resume the run"
+        second = started[0]
         try:
-            ip_2 = container_ip(inspect_container(second), network)
-            generation = bind_token(conn, "t-a", run_id, token_2, ip_2)
+            generation = conn.execute("SELECT generation FROM runs WHERE id = %s", (run_id,)).fetchone()[0]
             if not _wait_state(conn, "t-a", run_id, ("SUCCEEDED",)):
                 return False, "resume did not succeed\n" + container_logs(second)
         finally:
@@ -138,8 +141,18 @@ def scenario_injection() -> tuple[bool, str]:
     cursor = conn.execute(
         "SELECT body FROM memory WHERE run_id = 'drill-injection' AND kind = 'cursor'"
     ).fetchall()
-    ok = draft is not None and draft[0] is True and draft[1] == "DRAFT" and row["state"] == "SUCCEEDED" and len(cursor) == 1
-    return ok, f"run_id drill-injection draft {draft} state {row['state']} cursor {cursor}\nevents {ev}"
+    conn.execute(
+        "INSERT INTO memberships (tenant_id, user_id, role) VALUES ('t-a', 'approver-a', 'approver') ON CONFLICT DO NOTHING"
+    )
+    try:
+        approve(conn, "t-a", "drill-injection:injection", "approver-a")
+        held = False
+    except FlaggedNeedsReview:
+        held = True
+    ok = held and draft is not None and draft[0] is True and draft[1] == "DRAFT" and row["state"] == "SUCCEEDED" and len(cursor) == 1
+    return ok, (
+        f"run_id drill-injection draft {draft} ordinary approval refused {held} state {row['state']} cursor {cursor}\nevents {ev}"
+    )
 
 
 def scenario_escape() -> tuple[bool, str]:
@@ -228,6 +241,14 @@ def scenario_empty() -> tuple[bool, str]:
     return ok, f"run_id drill-empty state {row['state']} artifact {row['artifact']!r}\nevents {ev}"
 
 
+def scenario_document() -> tuple[bool, str]:
+    """The document agent reads the spreadsheet attachment and runs the fixed sheet program inside its container."""
+    row, ev, result = _run("drill-document", "t-b", "doc-analyst", DOC, "doc", [])
+    ok = row["state"] == "SUCCEEDED" and "figures " in (row["artifact"] or "")
+    figures = next((line for line in (row["artifact"] or "").splitlines() if line.startswith("figures ")), "")
+    return ok, f"run_id drill-document state {row['state']} {figures}\nevents {ev}" + ("" if ok else f"\n{result}")
+
+
 def scenario_eval() -> tuple[bool, str]:
     """Writes its own baseline every run. No model call; scores the committed recordings."""
     conn = connect(os.environ["DATABASE_URL"])
@@ -299,12 +320,15 @@ def scenario_send() -> tuple[bool, str]:
     return ok, f"smtp {len(logged)} first sink {len(first_sink)} second sink {len(second_sink)} message {message}"
 
 
-def run_locked(run_id: str, tenant: str, agent_id: str, config_path: str, scenario: str, policy: RunPolicy) -> tuple[dict, str]:
-    """open_run, start a locked agent container, bind its IP, wait for a terminal state."""
+def run_locked(
+    run_id: str, tenant: str, agent_id: str, config_path: str, scenario: str, policy: RunPolicy, faults: list | None = None
+) -> tuple[dict, str]:
+    """open_run, start a fresh locked agent container, bind its IP, wait for a terminal state."""
     network = os.environ["AGENT_NETWORK"]
     conn = connect(os.environ["DATABASE_URL"])
     token = f"token-{run_id}"
     open_run(conn, tenant, run_id, agent_id, token, "10.255.255.1", policy)
+    ProxyClient(os.environ["PROXY_A_URL"], "").faults(list(faults or []))
     cid = _start_agent(os.environ["HOST_REPO"], network, token, run_id, config_path, scenario, pause=False)
     try:
         bind_token(conn, tenant, run_id, token, container_ip(inspect_container(cid), network))
@@ -312,6 +336,7 @@ def run_locked(run_id: str, tenant: str, agent_id: str, config_path: str, scenar
         logs = container_logs(cid)
     finally:
         remove_container(cid)
+        ProxyClient(os.environ["PROXY_A_URL"], "").faults([])
     return run_row(conn, tenant, run_id), logs
 
 
@@ -361,17 +386,10 @@ def _policy(config_path: str) -> RunPolicy:
 
 
 def _run(run_id, tenant, agent_id, config_path, scenario, faults, policy: RunPolicy | None = None):
-    """In-process scenarios. None of them runs untrusted code: the proxy refuses py.exec, and hang only sleeps."""
-    proxy = os.environ["PROXY_A_URL"]
-    token = f"token-{run_id}"
-    client = ProxyClient(proxy, token)
+    """Every scenario runs in a fresh locked container through run_locked. Returns (row, events, container log tail)."""
+    row, logs = run_locked(run_id, tenant, agent_id, config_path, scenario, policy or _policy(config_path), faults)
     conn = connect(os.environ["DATABASE_URL"])
-    config = load_agent(Path(config_path))
-    open_run(conn, tenant, run_id, agent_id, token, client.whoami(), policy or RunPolicy.from_config(config))
-    client.faults(faults)
-    result = execute(client, config, run_id, scenario)
-    client.faults([])
-    return run_row(conn, tenant, run_id), events(conn, tenant, run_id), result
+    return row, events(conn, tenant, run_id), (logs.strip().splitlines() or [""])[-1][:600]
 
 
 def _start_agent(

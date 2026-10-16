@@ -176,3 +176,61 @@ def test_external_recipient_from_the_injection_mail():
         ["a.example"],
     )
     assert found == "outside@evil.example"
+
+
+def limited(max_steps=20, max_tokens=8000, wall_s=120) -> AgentConfig:
+    base = config()
+    return AgentConfig(**{**base.__dict__, "limits": Limits(max_steps, max_tokens, 1.0, wall_s)})
+
+
+def test_step_limit_stops_with_saved_progress_before_the_next_call():
+    fake = Fake([])
+    result = execute(fake, limited(max_steps=2), "r-steps", "brief")
+    assert result["state"] == "STOPPED_BUDGET"
+    assert len(fake.tools) == 2 and fake.prompts == []
+    assert fake.states[-1][0] == "STOPPED_BUDGET" and "max_steps" in fake.states[-1][1]
+
+
+def test_token_limit_skips_a_call_that_would_pass_it():
+    fake = Fake([])
+    result = execute(fake, limited(max_tokens=100), "r-tokens", "brief")
+    assert result["state"] == "STOPPED_BUDGET"
+    assert fake.prompts == []
+    assert "max_tokens" in fake.states[-1][1]
+
+
+def test_wall_clock_limit_stops_the_run():
+    ticks = iter(range(0, 1000, 50))
+    fake = Fake([])
+    result = execute(fake, limited(wall_s=60), "r-wall", "brief", clock=lambda: next(ticks))
+    assert result["state"] == "STOPPED_BUDGET"
+    assert "wall_s" in fake.states[-1][1]
+
+
+class Flaky(Fake):
+    def __init__(self, failures):
+        super().__init__([])
+        self.failures = failures
+
+    def tool(self, name, args, step):
+        if name == "mail.list" and self.failures > 0:
+            self.failures -= 1
+            self.tools.append((name, args))
+            return {"status": 500, "error": "boom"}
+        return super().tool(name, args, step)
+
+
+def test_tool_error_is_retried_and_the_run_recovers():
+    fake = Flaky(2)
+    result = execute(fake, config(), "r-tool", "brief")
+    assert result["state"] == "SUCCEEDED"
+    assert [name for name, _ in fake.tools].count("mail.list") == 3
+    assert fake.events.count("tool_retry") == 2
+
+
+def test_tool_error_after_three_retries_goes_back_to_the_model():
+    fake = Flaky(10)
+    execute(fake, config(), "r-tool-model", "brief")
+    assert [name for name, _ in fake.tools].count("mail.list") == 4
+    assert "tool_error_to_model" in fake.events
+    assert fake.prompts, "the model still gets the call, with the error in view"

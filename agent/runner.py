@@ -1,15 +1,83 @@
 import time
 
-from agent.loop import after_hang, after_provider_pressure, is_loop, stop_with_progress
+from agent.loop import after_hang, after_provider_pressure, after_tool_error, is_loop, stop_with_progress
 from agent.prompts import brief_prompt, doc_prompt, external_recipient
 from agent.tools import py_exec, sheet_total
 from runtime.citations import cites_line
+from proxy.providers import OUTPUT_CAP
 from runtime.config import AgentConfig
 
 
-def execute(client, config: AgentConfig, run_id: str, scenario: str = "brief", executor=None) -> dict:
+class LimitReached(Exception):
+    def __init__(self, limit: str):
+        self.limit = limit
+        super().__init__(limit)
+
+
+class Guarded:
+    """Wraps the proxy client. Each call is checked against max_steps, max_tokens and wall_s before it goes out.
+
+    Tool errors (status 500 and up) retry three times, then the error goes back to the model.
+    """
+
+    def __init__(self, client, config: AgentConfig, clock):
+        self._client = client
+        self._limits = config.limits
+        self._clock = clock
+        self._start = None
+        self.steps = 0
+        self.tokens = 0
+
+    def __getattr__(self, name):
+        return getattr(self._client, name)
+
+    def _check(self, tokens_next: int = 0) -> None:
+        now = self._clock()
+        if self._start is None:
+            self._start = now
+        if self.steps >= self._limits.max_steps:
+            raise LimitReached("max_steps")
+        if now - self._start > self._limits.wall_s:
+            raise LimitReached("wall_s")
+        if self.tokens + tokens_next > self._limits.max_tokens:
+            raise LimitReached("max_tokens")
+        self.steps += 1
+
+    def tool(self, name: str, args: dict, step_no: int) -> dict:
+        failures = 0
+        while True:
+            self._check()
+            result = self._client.tool(name, args, step_no)
+            if result.get("status", 200) < 500:
+                return result
+            action = after_tool_error(failures)
+            failures += 1
+            if action == "retry":
+                self._client.event("tool_retry", {"tool": name, "attempt": failures})
+                continue
+            self._client.event("tool_error_to_model", {"tool": name, "error": result.get("error")})
+            return result
+
+    def complete(self, messages, model: str, step_no: int) -> dict:
+        self._check(OUTPUT_CAP)
+        result = self._client.complete(messages, model, step_no)
+        self.tokens += int(result.get("tokens_in") or 0) + int(result.get("tokens_out") or 0)
+        return result
+
+
+def execute(client, config: AgentConfig, run_id: str, scenario: str = "brief", executor=None, clock=time.monotonic) -> dict:
     """executor runs code locally, in whatever container this process is in. Tests pass a fake."""
-    executor = executor or py_exec
+    guarded = Guarded(client, config, clock)
+    try:
+        return _dispatch(guarded, config, run_id, scenario, executor or py_exec)
+    except LimitReached as exc:
+        kind, artifact = stop_with_progress("STOPPED_BUDGET", f"saved progress: {exc.limit}")
+        client.event("limit_reached", {"limit": exc.limit})
+        stored = client.state(kind, artifact)
+        return {"state": stored.get("state", kind), "artifact": artifact}
+
+
+def _dispatch(client, config: AgentConfig, run_id: str, scenario: str, executor) -> dict:
     if scenario == "escape":
         return _escape(client, run_id, executor)
     if scenario == "budget":

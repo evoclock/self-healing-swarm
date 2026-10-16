@@ -324,3 +324,45 @@ def test_rebind_drops_the_previous_token():
         assert resolve(conn, "tok-gate-rebind", IP) is None
         assert resolve(conn, "tok-gate-rebind-2", IP) == {"tenant_id": "t-a", "run_id": "gate-rebind", "generation": 1}
     assert len(query("t-a", "SELECT token FROM run_tokens WHERE run_id = 'gate-rebind'")) == 1
+
+
+class Upstream:
+    def __init__(self):
+        self.calls = 0
+
+    def __call__(self, messages, tools, model, **kwargs):
+        self.calls += 1
+        return Completion("live", 10, 10, Decimal("0.000001"))
+
+
+def live(tmp_path, upstream) -> ProxyContext:
+    return ProxyContext(URL, Cassette(tmp_path), "record", "test", upstream=upstream)
+
+
+def test_a_live_call_whose_estimate_would_pass_the_cap_is_refused_before_it_goes_out(tmp_path):
+    token = opened("gate-live-cap", max_usd=Decimal("0.00001"))
+    upstream = Upstream()
+    status, body = post(live(tmp_path, upstream), "/v1/complete", {
+        "token": token, "messages": [{"role": "user", "content": "live"}], "model": "primary", "step_no": 1,
+    })
+    assert status == 402 and body["error"] == "budget"
+    assert upstream.calls == 0
+
+
+def test_a_live_call_inside_the_cap_goes_out_and_is_charged_its_real_cost(tmp_path):
+    token = opened("gate-live-ok", max_usd=Decimal("1.00"))
+    upstream = Upstream()
+    status, _body = post(live(tmp_path, upstream), "/v1/complete", {
+        "token": token, "messages": [{"role": "user", "content": "live"}], "model": "primary", "step_no": 1,
+    })
+    assert status == 200 and upstream.calls == 1
+    assert query("t-a", "SELECT cost_usd FROM steps WHERE run_id = 'gate-live-ok'") == [(Decimal("0.000001"),)]
+
+
+def test_each_proxy_request_renews_the_run_lease(tmp_path):
+    token = opened("gate-lease")
+    with psycopg.connect(URL, autocommit=True) as conn:
+        conn.execute("SELECT set_config('app.tenant_id', 't-a', false)")
+        conn.execute("UPDATE runs SET lease_until = now() - interval '1 hour' WHERE id = 'gate-lease'")
+    post(context(tmp_path), "/v1/tool", {"token": token, "name": "mail.list", "args": {}, "step_no": 1})
+    assert query("t-a", "SELECT lease_until > now() FROM runs WHERE id = 'gate-lease'") == [(True,)]
