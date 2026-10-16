@@ -1,21 +1,28 @@
-Cost per agent per day, from the recorded journal.
+Recorded token counts, and where a real dollar amount comes from.
 
-The price table in the proxy is 2 dollars per million input tokens and 6 dollars per million output tokens for primary. The local model is 0 dollars. Its cost is compute on the machine that serves it, not a line on this bill.
+The daily brief, tenant t-a, eight synthetic emails: 204 input tokens, 231 output tokens, `usage.cost` 0.00005844 dollars.
 
-Daily brief, one recorded run, primary:
+The document agent, tenant t-b, spreadsheet doc-b-budget: 84 input tokens, 48 output tokens, `usage.cost` 0.00001464 dollars.
 
-204 input tokens times 2 dollars, plus 199 output tokens times 6 dollars, divided by 1,000,000.
+The journal stores `usage.cost` from the Gateway response. Replay charges that stored figure.
 
-408 plus 1,194 is 1,602. Divided by 1,000,000 is 0.001602 dollars. The journal row for record-daily-brief step 3 stores that figure.
+Project spend is `GET /v1/projects/{project_id}/usage`. It needs a management key with the read_usage scope. The key that calls the model cannot call this route. `start` and `end` are inclusive dates. They default to the first of the month through today.
 
-Four tenants each run one brief a day. 4 times 0.001602 is 0.006408 dollars per day for the brief agent.
+The response carries:
 
-Document agent, one recorded run, primary:
+- `merge_hosted_spend`, managed-credential spend in dollars
+- `byok_spend`, bring-your-own-key usage at list price
+- `web_search_spend`, server-side web search
+- `total_spend`
+- `request_count`
+- `model_spend`, one amount per model
+- `model_spend_granularity`, which is `month`
+- `project_id`, `start`, and `end`
 
-84 input tokens times 2, plus 56 output tokens times 6, divided by 1,000,000.
+`model_spend` does not split a brief from a document run when both use one model. A single call's charge is `usage.cost` on that response, and that is the figure the journal stores.
 
-168 plus 336 is 504. Divided by 1,000,000 is 0.000504 dollars. The journal row for record-doc-analyst step 4 stores that figure.
+Four projects now exist, one per tenant. Each has a monthly hard limit of 1 dollar. A recorded model call sends the tenant's project id as `X-Project-Id`. Spend after that lands on `GET /v1/projects/{project_id}/usage`. The two charges above are one brief call and one document call from the latest recording. They are not a per-agent day.
 
-Four tenants each run one document agent a day. 4 times 0.000504 is 0.002016 dollars per day.
+A read of organization usage for 1 Oct 2026 through 16 Oct 2026 showed 0.025478 dollars and 9 requests, on one key with no project. That read is not recomputed here. The documentation sample amounts are not this measurement.
 
-Both agent types together are 0.008424 dollars per day at this recording's token counts. A longer brief costs more. The local fallback adds no API charge.
+The Unified API rate limit is a different product. On the Professional plan it is 400 requests per minute for each linked account. Gateway model traffic is not that limit.

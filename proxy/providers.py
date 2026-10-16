@@ -4,11 +4,8 @@ from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 
-PRICE_PER_MILLION = {
-    "primary": (Decimal("2.0"), Decimal("6.0")),
-    "local": (Decimal("0"), Decimal("0")),
-}
 OUTPUT_CAP = 512
+KNOWN_MODELS = frozenset({"primary", "local"})
 
 GATEWAY_BASE_URL = "https://api-gateway.merge.dev/v1/openai"
 LOCAL_BASE_URL = "http://127.0.0.1:18894/v1"
@@ -24,37 +21,64 @@ class ReplayMiss(Exception):
         super().__init__(f"replay_miss: {digest}")
 
 
+_TRACE_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:-")
+
+
+def _trace_value(value: str, limit: int) -> str | None:
+    if 1 <= len(value) <= limit and all(char in _TRACE_CHARS for char in value):
+        return value
+    return None
+
+
+def merge_trace_headers(tenant_id: str, run_id: str, step_no: int, model: str, parent_id: str | None = None) -> dict:
+    """Headers that opt one cloud call into Gateway Logs. Invalid values are omitted, not rewritten."""
+    headers = {}
+    trace_id = _trace_value(f"{tenant_id}.{run_id}", 128)
+    thread_id = _trace_value(tenant_id, 128)
+    turn_id = _trace_value(f"step-{int(step_no)}", 128)
+    span = _trace_value(model, 64)
+    if trace_id:
+        headers["X-Merge-Trace-Id"] = trace_id
+    if thread_id:
+        headers["X-Merge-Thread-Id"] = thread_id
+    if turn_id:
+        headers["X-Merge-Turn-Id"] = turn_id
+    if span:
+        headers["X-Merge-Span-Name"] = span
+    parent = _trace_value(parent_id or "", 128)
+    if parent:
+        headers["X-Merge-Parent-Span-Id"] = parent
+    return headers
+
+
 @dataclass(frozen=True)
 class Completion:
     text: str
     tokens_in: int
     tokens_out: int
+    cost_usd: Decimal | None = None
+    request_id: str | None = None
 
     def to_json(self) -> bytes:
-        return json.dumps(
-            {
-                "text": self.text,
-                "tokens_in": self.tokens_in,
-                "tokens_out": self.tokens_out,
-            },
-            sort_keys=True,
-        ).encode()
+        payload = {
+            "text": self.text,
+            "tokens_in": self.tokens_in,
+            "tokens_out": self.tokens_out,
+        }
+        if self.cost_usd is not None:
+            payload["cost_usd"] = str(self.cost_usd)
+        return json.dumps(payload, sort_keys=True).encode()
 
     @classmethod
     def from_json(cls, raw: bytes) -> "Completion":
         data = json.loads(raw)
-        return cls(data["text"], int(data["tokens_in"]), int(data["tokens_out"]))
-
-
-def estimate_usd(model: str, tokens_in: int, tokens_out: int) -> Decimal:
-    price_in, price_out = PRICE_PER_MILLION[model]
-    return (tokens_in * price_in + tokens_out * price_out) / 1_000_000
-
-
-def server_estimate(model: str, messages) -> Decimal:
-    """Input tokens from the serialized messages, output at the fixed cap. Payload estimates are ignored."""
-    tokens_in = len(json.dumps(messages, sort_keys=True, separators=(",", ":"))) // 4
-    return estimate_usd(model, tokens_in, OUTPUT_CAP)
+        cost = data.get("cost_usd")
+        return cls(
+            data["text"],
+            int(data["tokens_in"]),
+            int(data["tokens_out"]),
+            None if cost is None else Decimal(str(cost)),
+        )
 
 
 def step_digest(messages, tools) -> str:
@@ -89,7 +113,7 @@ class Provider:
         self.mode = mode
         self.upstream = upstream
 
-    def complete(self, messages, tools, model: str, temperature=None, max_tokens=None) -> Completion:
+    def complete(self, messages, tools, model: str, temperature=None, max_tokens=None, project_id=None, trace=None) -> Completion:
         digest = step_digest(messages, tools)
         if self.mode == "replay":
             return Completion.from_json(self.cassette.get(digest))
@@ -101,6 +125,8 @@ class Provider:
             model,
             temperature=0 if temperature is None else temperature,
             max_tokens=OUTPUT_CAP if max_tokens is None else max_tokens,
+            project_id=project_id,
+            trace=trace,
         )
         self.cassette.put(digest, completion.to_json())
         return completion
@@ -110,13 +136,44 @@ def gateway_model(name: str) -> str:
     return GATEWAY_MODELS.get(name, name)
 
 
+def recorded_cost(cassette: Cassette, digest: str) -> Decimal | None:
+    try:
+        raw = cassette.get(digest)
+    except ReplayMiss:
+        return None
+    return Completion.from_json(raw).cost_usd
+
+
+def completion_from_payload(payload: dict) -> Completion:
+    message = (payload.get("choices") or [{}])[0].get("message") or {}
+    usage = payload.get("usage") or {}
+    cost = usage.get("cost")
+    if cost is None:
+        parsed = None
+    elif isinstance(cost, Decimal):
+        parsed = cost
+    else:
+        parsed = Decimal(str(cost))
+    return Completion(
+        message.get("content") or "",
+        int(usage.get("prompt_tokens") or 0),
+        int(usage.get("completion_tokens") or 0),
+        parsed,
+    )
+
+
 def completion_from_chat(response) -> Completion:
     message = response.choices[0].message
     usage = response.usage
+    cost = getattr(usage, "cost", None)
+    if cost is None:
+        extra = getattr(usage, "model_extra", None) or {}
+        cost = extra.get("cost")
     return Completion(
         message.content or "",
         int(getattr(usage, "prompt_tokens", 0) or 0),
         int(getattr(usage, "completion_tokens", 0) or 0),
+        None if cost is None else Decimal(str(cost)),
     )
 
 
@@ -142,7 +199,7 @@ def gateway_upstream(api_key: str, client=None, clients=None):
                 opened[model] = OpenAI(base_url=GATEWAY_BASE_URL, api_key=api_key)
         return opened[model]
 
-    def complete(messages, tools, model: str, temperature=None, max_tokens=None) -> Completion:
+    def complete(messages, tools, model: str, temperature=None, max_tokens=None, project_id=None, trace=None) -> Completion:
         kwargs = {"model": gateway_model(model), "messages": list(messages)}
         if tools:
             kwargs["tools"] = list(tools)
@@ -150,9 +207,26 @@ def gateway_upstream(api_key: str, client=None, clients=None):
             kwargs["temperature"] = temperature
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
+        headers = {}
+        if model != "local":
+            if project_id:
+                headers["X-Project-Id"] = project_id
+            if trace:
+                headers.update(trace)
         if model == "local":
             kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
-        return completion_from_chat(client_for(model).chat.completions.create(**kwargs))
+        elif headers:
+            kwargs["extra_headers"] = headers
+        completions = client_for(model).chat.completions
+        raw_create = getattr(getattr(completions, "with_raw_response", None), "create", None)
+        if raw_create is None:
+            return completion_from_chat(completions.create(**kwargs))
+        raw = raw_create(**kwargs)
+        parsed = completion_from_payload(json.loads(raw.text, parse_float=Decimal))
+        request_id = _trace_value(raw.headers.get("x-request-id") or "", 128)
+        if request_id is None:
+            return parsed
+        return Completion(parsed.text, parsed.tokens_in, parsed.tokens_out, parsed.cost_usd, request_id)
 
     return complete
 

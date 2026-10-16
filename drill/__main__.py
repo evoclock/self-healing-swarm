@@ -201,8 +201,12 @@ def scenario_budget() -> tuple[bool, str]:
     policy = _policy(BRIEF).with_max(Decimal("0.00001"))
     row, ev, result = _run("drill-budget", "t-a", "daily-brief", BRIEF, "budget", [], policy)
     denials = _budget_denials(conn, "t-a", "drill-budget")
+    estimate = _budget_estimate(conn, "t-a", "drill-budget")
     ok = row["state"] == "STOPPED_BUDGET" and "saved progress" in (row["artifact"] or "") and denials == 1
-    return ok, f"run_id drill-budget state {row['state']} artifact {row['artifact']} proxy denials {denials}\nevents {ev}"
+    return ok, (
+        f"run_id drill-budget state {row['state']} artifact {row['artifact']} "
+        f"proxy denials {denials} estimate {estimate}\nevents {ev}"
+    )
 
 
 def scenario_hang() -> tuple[bool, str]:
@@ -323,6 +327,19 @@ def foreign_denials(conn, tenant: str, run_id: str) -> list:
         """,
         (run_id, digest),
     ).fetchall()
+
+
+def _budget_estimate(conn, tenant: str, run_id: str) -> str:
+    conn.execute("SELECT set_config('app.tenant_id', %s, false)", (tenant,))
+    row = conn.execute(
+        """
+        SELECT detail->>'estimate' FROM audit_log
+        WHERE detail->>'reason' = 'budget' AND detail->>'run_id' = %s
+        ORDER BY id DESC LIMIT 1
+        """,
+        (run_id,),
+    ).fetchone()
+    return "" if row is None or row[0] is None else row[0]
 
 
 def _budget_denials(conn, tenant: str, run_id: str) -> int:
