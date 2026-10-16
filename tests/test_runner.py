@@ -143,6 +143,16 @@ def test_empty_artifact_posts_success_and_the_proxy_decides():
     assert fake.states[-1] == ("SUCCEEDED", "")
 
 
+def test_exhausted_202_does_not_fabricate_a_brief():
+    fake = Fake([{"status": 202, "in_progress": True}])
+    result = execute(fake, config(), "run-pending", "brief")
+    assert result["state"] == "FAILED"
+    assert result["artifact"] == ""
+    assert fake.states == [("FAILED", "in_progress")]
+    assert "in_progress" in fake.events
+    assert not any(artifact.startswith("Brief") for _state, artifact in fake.states)
+
+
 def test_client_sends_no_budget_fields_and_polls_202(monkeypatch):
     sent = []
     replies = [(202, {"in_progress": True}), (200, {"text": "ok"})]

@@ -92,6 +92,10 @@ def _model(client, config: AgentConfig, messages, step_no: int) -> tuple[str | N
             continue
         if status == 409:
             raise RuntimeError(result.get("digest") or result.get("error") or "replay_miss")
+        if status == 202:
+            client.event("in_progress", {"step_no": step_no})
+            client.state("FAILED", "in_progress")
+            return None, "FAILED"
         return result.get("text") or "", model
 
 
@@ -117,14 +121,15 @@ def _escape(client, run_id: str, executor) -> dict:
 
 
 def _budget(client, config: AgentConfig, run_id: str) -> dict:
-    """STOPPED_BUDGET only after the proxy answered 402. An allowed completion is a failed drill."""
-    result = client.complete([{"role": "user", "content": "budget probe"}], config.models[0], 1)
-    if result.get("status") == 402:
-        kind, artifact = stop_with_progress("STOPPED_BUDGET", "saved progress")
-        client.state(kind, artifact)
-        return {"state": kind, "artifact": artifact}
+    """STOPPED_BUDGET only after the proxy answered 402 for the recorded brief call."""
+    listed = client.tool("mail.list", {}, 1)
+    messages = listed.get("messages") or []
+    client.tool("mail.read", {"ids": [message["id"] for message in messages]}, 2)
+    _text, state = _model(client, config, brief_prompt(config.instructions, messages), 3)
+    if state == "STOPPED_BUDGET":
+        return {"state": state, "artifact": "saved progress"}
     client.state("FAILED", "budget not enforced")
-    return {"state": "FAILED", "artifact": "budget not enforced", "status": result.get("status")}
+    return {"state": "FAILED", "artifact": "budget not enforced"}
 
 
 def _hang(client, run_id: str, executor) -> dict:
@@ -151,6 +156,10 @@ def _loop(client, config: AgentConfig, run_id: str) -> dict:
     for step in (1, 2, 3):
         digests.append("loop-probe")
         result = client.complete(messages, config.models[0], step)
+        if result.get("status") == 202:
+            client.event("in_progress", {"step_no": step})
+            stored = client.state("FAILED", "in_progress")
+            return {"state": stored.get("state"), "artifact": "in_progress", "pending": True}
         text = result.get("text") or text
         if is_loop(tuple(digests), 0):
             kind, artifact = stop_with_progress("STOPPED_LOOP", text or "saved progress")

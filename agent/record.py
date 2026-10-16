@@ -6,7 +6,7 @@ from agent.client import ProxyClient
 from agent.runner import execute
 from runtime.config import load_agent
 from runtime.policy import RunPolicy
-from runtime.runs import connect, open_run
+from runtime.runs import connect, open_run, step_costs
 
 
 def main() -> int:
@@ -24,7 +24,7 @@ def main() -> int:
         config = load_agent(Path(config_path))
         open_run(conn, tenant, run_id, agent_id, token, client.whoami(), RunPolicy.from_config(config))
         result = execute(client, config, run_id, scenario)
-        print(f"{scenario} {result.get('state')}", flush=True)
+        print(f"{scenario} {result.get('state')} steps {step_costs(conn, tenant, run_id)}", flush=True)
         if result.get("state") not in ("SUCCEEDED", "STOPPED_BUDGET", "STOPPED_LOOP"):
             print(result, flush=True)
             return 1
@@ -33,7 +33,10 @@ def main() -> int:
     open_run(conn, "t-a", "record-loop", "daily-brief", "token-record-loop", probe.whoami(), brief)
     looped = probe.complete([{"role": "user", "content": "loop probe"}], "primary", 1)
     local = probe.complete([{"role": "user", "content": "Reply with the single word pong."}], "local", 2)
-    print(f"loop {looped.get('status')} local {local.get('text')}", flush=True)
+    print(
+        f"loop {looped.get('status')} local {local.get('text')} steps {step_costs(conn, 't-a', 'record-loop')}",
+        flush=True,
+    )
     if local.get("status") != 200:
         print(local, flush=True)
         return 1

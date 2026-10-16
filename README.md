@@ -1,4 +1,6 @@
-This repo runs multi-tenant background agents. An agent container uses user 65534, a read-only root, all capabilities dropped, no-new-privileges, 512 MB of memory, half a CPU, 64 processes, and a 64 MB noexec scratch disk on `/tmp`. It joins `swarm-agents`, an internal network, so its only network peers are the two egress proxies. The host repo is mounted read-only at `/src`. The run token names the run. The provider key stays in the proxy.
+This repository is a technical exercise for a Principal AI Engineer role.
+
+This repo runs multi-tenant background agents. Each agent container runs as user 65534 with a read-only root, no capabilities, and no-new-privileges. Limits are 512 MB of memory, half a CPU, and 64 processes. A 64 MB scratch disk at `/tmp` disallows executable files. It joins `swarm-agents`, an internal network, so its only network peers are the two egress proxies. The container mounts the host repo read-only at `/src`. The run token names the run. The provider key stays in the proxy.
 
 The proxies share Postgres and nothing else. The proxy decides budget, tool access, draft flags, and whether a run succeeded. The agent sends a command. It cannot send a cap, a spend, a cost estimate, a tool list, or a domain list. If the request body has such fields, the proxy ignores them.
 
@@ -12,13 +14,13 @@ The interactive diagram is [docs/system-design.html](docs/system-design.html). O
 
 `open_run` stores a `RunPolicy` on the run row: `max_usd` and the tool list. The drill and `agent.record` call it, because they hold the database URL and the yaml. The agent container never calls it. `RunPolicy.from_config` copies the yaml. `with_max` replaces the cap, which is how the budget scenario opens a run at 0.00001 while the daily-brief yaml still says 1.00. Each proxy request resolves the token and then reads that policy once into `Bound`.
 
-Resume does not call `open_run`, because `open_run` resets the run and deletes its journal. Resume calls `bind_token`. In one transaction, `bind_token` increments `runs.generation`, deletes the run's previous `run_tokens` row, and inserts the new token with the new generation and container IP. `resolve_token` returns tenant, run, and generation. A container is named `swarm-{run_id}`. A second container for the same run gets a suffix, as in `swarm-drill-kill-2`.
+Resume does not call `open_run`, because `open_run` resets the run and deletes its journal. Resume calls `bind_token`. In one transaction, `bind_token` increments `runs.generation`, deletes the run's previous `run_tokens` row, and inserts the new token with the new generation and container IP. `resolve_token` returns tenant, run, and generation. Container names follow `swarm-{run_id}`. A second container for the same run gets a suffix, as in `swarm-drill-kill-2`.
 
 ### Budget
 
-The proxy estimates a completion from the serialized messages: their length divided by 4 is the input token count, plus a fixed output cap of 512 tokens. Prices are `Decimal` per million tokens. `primary` costs 2 for input and 6 for output. `local` costs 0, so a dollar cap does not deny a `local` completion. An unknown model name raises `KeyError` in `estimate_usd`, and the proxy answers 400.
+A step's cost is `usage.cost` from the Gateway response. Replay reads that figure from the recording and compares it with the cap before serving the call. `local` has no Gateway charge, so a dollar cap does not deny it. An unknown model name gets 400.
 
-The cap check locks the run row, sums `steps.cost_usd` for the run, and compares the sum plus the estimate with the stored `max_usd`. If the step is allowed, its STARTED row stores the estimate as a reservation. That transaction commits before the provider call. It is not held open during the call. A second step on the other proxy sees the reservation. After the call, the step stores the actual tokens and cost. A denial returns 402, writes a `budget` row to `audit_log` with the run id, and writes a `budget_denied` run event.
+The cap check locks the run row and sums `steps.cost_usd`. Replay adds this recording's `usage.cost` to that sum. A live call adds nothing yet, so it is refused only when the stored sum is already past `max_usd`. The check commits before the provider call. A denial returns 402, writes a `budget` row to `audit_log` with the run id, and writes a `budget_denied` run event. After a live call, the step stores the returned `usage.cost`.
 
 `complete` applies the fault queue before the budget check and before the provider call. An armed fault returns 503 or 429 and does not touch the journal.
 
@@ -26,17 +28,17 @@ The cap check locks the run row, sums `steps.cost_usd` for the run, and compares
 
 The step key is the run, the step number, and a hash of the messages and the tools. The model name is not part of the hash. The same hash is the cassette key, so a fallback to `local` replays the recording made for the same messages.
 
-`begin_step` is `INSERT ... ON CONFLICT DO NOTHING RETURNING`. The winner gets a claim, which is its generation and its `started_at`, and only the winner calls the provider. A caller that finds the step COMPLETED gets the stored body and the provider is not called. A caller that finds the step STARTED under its own generation, and younger than 30 seconds, gets `202 {"in_progress": true}`. `ProxyClient` polls a 202 for up to 90 seconds. When that row is 30 seconds old, the next same-generation caller takes it over and sets `cost_uncertain`. A caller with a newer generation takes over a leftover STARTED row at once, also with `cost_uncertain`. `finish_step` writes only when the row still has the claim's generation and `started_at`.
+`begin_step` uses `INSERT ... ON CONFLICT DO NOTHING RETURNING`. The winner receives a claim containing its generation and `started_at`, then calls the provider. A caller that finds a COMPLETED step receives the stored response without another provider call.
 
-A takeover calls the provider again. In record mode that is a second bill. The ledger keeps one cost for the step, the taker's reservation replaced by the taker's actual cost, so the cap can be exceeded by the call that lost the claim. The late caller can still receive 200 and its own text. The journal keeps the winner's text.
+If a step is already STARTED for this same generation, the proxy answers 202, `{"in_progress": true}`. How old that row is does not matter. The proxy does not call the provider, and the reserved cost stays as it is. The client keeps asking for up to 90 seconds. If the answer is still 202, the runner records FAILED and sets the artifact to `in_progress`. It does not record SUCCEEDED, and it does not write a brief.
 
-If the client is still receiving 202 after about 90 seconds, it returns that 202. The runner treats any status other than 402, 429, 503, or 409 as a completion. Empty text can then be stored as a brief. The usual poll takes the step over at 30 seconds, before that timeout.
+Only a newer generation can take that step. Resume gets the newer generation from `bind_token`. That takeover sets `cost_uncertain` and calls the provider. If the first call was already billed, the journal keeps the new cost. `finish_step` writes the result only when the generation and `started_at` still match the claim. A late caller can still get 200 and its own text. The journal keeps the text from the caller that won.
 
 ### Tools
 
-The proxy runs `mail.list`, `mail.read`, `docs.read`, `memory.write`, and `draft.create`, and each only when the run's stored tool list names it. Any other tool is denied with `tool_not_allowed`.
+The proxy runs `mail.list`, `mail.read`, `docs.read`, `memory.write`, and `draft.create`, and each only when the run's stored tool list names it. The proxy denies any other tool with `tool_not_allowed`.
 
-`py.exec` is refused with `not_executed`, even when the yaml lists it. The proxy does not import `py_exec` and does not start a subprocess. Code runs only in the agent process, through the runner's executor. That executor is `agent.tools.py_exec` in a container and a fake in unit tests. The spreadsheet total is a fixed program, `SHEET_PROGRAM`, that reads the sheet on stdin and sums each cell as a `Decimal`. A cell is never part of the `-c` code. A cell that is not a number makes the program exit 2. For the budget sheet the program prints `4875`.
+The proxy refuses `py.exec` with `not_executed`, even when the yaml lists it. The proxy does not import `py_exec` and does not start a subprocess. Code runs only in the agent process, through the runner's executor. That executor is `agent.tools.py_exec` in a container and a fake in unit tests. The spreadsheet total is a fixed program, `SHEET_PROGRAM`, that reads the sheet on stdin and sums each cell as a `Decimal`. A cell is never part of the `-c` code. A cell that is not a number makes the program exit 2. For the budget sheet the program prints `4875`.
 
 `mail.read` and `docs.read` return `{"denied": true, "reason": "foreign_id"}` when a requested id is not in the token's tenant. That response is stored on the step. `draft.create` flags a draft from `tenants.domains` and its attachments. If the call has a `domains` argument, the proxy ignores it. `memory.write` refuses a `cursor`.
 
@@ -52,7 +54,7 @@ The brief runner appends `cites:` and the mail ids it listed. `_document` append
 
 ### Outbox
 
-The message id is `<draft_id@outbox>`. `deliver` sets the draft to SENDING, sends over SMTP, then appends to the in-memory sink and sets SENT. If SMTP raises, the draft stays SENDING and the sink is unchanged. The SMTP server writes one JSON record per message to its log. If that log already has a record with the same `message_id`, `deliver` marks the draft SENT and does not send again, even with a new empty sink.
+The message id is `<draft_id@outbox>`. `deliver` sets the draft to SENDING, sends over SMTP, then appends to the in-memory sink and sets SENT. If SMTP raises, the draft stays SENDING and the sink is unchanged. The SMTP server writes one JSON record per message to its log. If the log contains the same `message_id`, `deliver` marks the draft SENT without sending again. This also works with a new empty sink.
 
 ### Evals
 
@@ -64,7 +66,9 @@ Adding `mail.list` to the doc-analyst yamls changed the doc-analyst config hash.
 
 ## One command
 
-`make drill` builds the agent image, starts Postgres and both proxies in replay mode, and runs the scenarios. It writes docs/drill-output.txt. The process exits non-zero if any scenario fails. Replay does not need a provider key.
+`make drill` builds the agent image, starts Postgres and both proxies in replay mode, and runs the scenarios. It prints one PASS or FAIL line per scenario, then the run state, the step costs, and the event names. It writes the same text to docs/drill-output.txt. The process exits non-zero if any scenario fails. Replay does not need a provider key.
+
+The proxy prints one line per complete, tool, state, and event on its own stdout. `docker compose logs -f proxy-a proxy-b` follows those lines while the drill runs. A line names the trace as `tenant.run`, the step, the model or tool, and the cost or the denial. Replay does not call Gateway, so a drill does not appear in Gateway Logs.
 
 The kill scenario and the agent half of the escape scenario run in locked agent containers. The other agent scenarios run the runner inside the drill process, against proxy-a.
 
@@ -73,7 +77,7 @@ The kill scenario and the agent half of the escape scenario run in locked agent 
 - `provider`: the armed faults return 503 and then 429, and the runner falls back to `local`.
 - `injection`: the injection mail produces a flagged draft, the run succeeds, and the proxy writes one cursor.
 - `escape`: three checks.
-  - The drill posts a `py.exec` that would write a marker file under the proxy's `/src` and print `/etc/shadow`. The scenario requires `not_executed`, no shadow text in the response, and no marker file afterwards.
+  - The drill posts a `py.exec` request containing code to write a marker under the proxy's `/src` and print `/etc/shadow`. The scenario requires `not_executed`, no shadow text in the response, and no marker file afterwards.
   - The drill starts two containers with the agent HostConfig on `swarm-agents`. One opens `/etc/shadow`. The other connects to example.com. Both must exit non-zero. The connect fails because the network is internal.
   - The agent's escape script runs in a locked container. The scenario requires one proxy-written `foreign_id` step for `mail.read` of `m-b-1`, which belongs to t-b, from a t-a run. The agent's `ESCALATED` state is reported but does not count as proof.
 - `budget`: the run is opened with `max_usd` 0.00001. The scenario requires `STOPPED_BUDGET` and one proxy budget denial in `audit_log`. The runner does not post `STOPPED_BUDGET` without a 402.
@@ -81,7 +85,7 @@ The kill scenario and the agent half of the escape scenario run in locked agent 
 - `loop`: the same digest three times stores `STOPPED_LOOP` with the last text.
 - `eval_gate`: no model call. The scenario deletes the t-a daily-brief eval rows and scores the committed daily-brief recordings with no baseline. It writes that row. It then scores the weakened and the harmless configs against that mean and writes both rows before `load_config`. The weakened config fails the injection and cross-tenant cases and `load_config` refuses it. The harmless config scores 1.8 against 2.0, a delta of 0.2, and loads.
 - `empty`: the runner posts `SUCCEEDED` with an empty artifact and the proxy stores `FAILED`.
-- `send`: the first `deliver` sends once. After the draft is reset to SENDING, a second `deliver` with a fresh sink finds the message id in the SMTP log and does not send.
+- `send`: the first `deliver` sends once. The draft is reset to SENDING. A second `deliver` uses a fresh sink, finds the message id in the SMTP log, and skips sending.
 
 ## Prerequisites
 
@@ -97,11 +101,22 @@ The proxy, test, drill, and record services install Python packages when the con
 
 ## Layout
 
-migrations holds the schema, row-level security, the synthetic mailbox, and `0005_run_policy.sql`. That migration adds the run policy columns, the generation columns, and `steps.started_at`, and it recreates `resolve_token`. runtime holds config parsing, `RunPolicy`, the `cites:` parser, memory writes, run open and rebind, `schedule`, and the container start flags. proxy holds the egress proxy, the gate that applies run policy, and the provider cassette. agent is the in-container loop, and its executor runs code there. synthetic and outbox are the mailbox and the draft send path. evals holds the golden cases, the judge recordings, and the gate. drill runs the scenarios. recordings/steps holds provider cassettes. recordings/evals holds one JSON output per golden case. agents holds one config per tenant.
+- `migrations/`: schema, row-level security, and the synthetic mailbox. `0005_run_policy.sql` adds policy and generation columns plus `steps.started_at`, and recreates `resolve_token`.
+- `runtime/`: configuration, run policy, citations, memory, run creation and rebinding, scheduling, and container settings.
+- `proxy/`: egress proxy, policy gate, and provider cassette support.
+- `agent/`: the in-container loop and code executor.
+- `synthetic/` and `outbox/`: mailbox and draft delivery.
+- `evals/`: golden cases, judge recordings, and evaluation gate.
+- `drill/`: demonstration scenarios.
+- `recordings/steps/`: provider cassettes.
+- `recordings/evals/`: one JSON output per golden case.
+- `agents/`: agent configurations grouped by tenant.
 
 ## Record, then replay
 
-`make record` starts the proxies in record mode and runs the daily brief and the document agent once through proxy-a. The gateway model serves primary. The local model serves the fallback call. Responses are stored under recordings/steps, keyed by a hash of the messages and the tools. The model name is not part of the hash, so a later fallback replays the same cassette.
+`make record` starts the proxies in record mode and runs the daily brief and the document agent once through proxy-a. It prints each run's state and the step costs just stored. The gateway model serves primary. The local model serves the fallback call. Responses are stored under recordings/steps, keyed by a hash of the messages and the tools. The model name is not part of the hash, so a later fallback replays the same cassette.
+
+A recorded cloud call sends `X-Project-Id` and the trace headers. The trace id is `tenant.run`, the thread id is the tenant, the turn id is the step, and the span name is the model. The next cloud call on that proxy sends the previous response's request id as the parent span. Gateway Logs can filter on that trace id. The local model is not traced. The same proxy log lines appear during record.
 
 `make capture` runs each golden case for the daily brief, the weakened brief, the harmless wording change, and the document agent. The judge call is temperature 0 and is stored in the case file as judge_score. The gate writes an eval_records row.
 
@@ -115,14 +130,14 @@ A brand new prompt has no recording. The gate cannot score it offline. Run `make
 
 ## Not changed in this pass
 
-The repo is still bind-mounted into agent containers. All agents share one network. Image packages are not pinned. `max_steps` and `wall_s` are not enforced. `schedule` does not order by deadline. Cassettes and eval recordings were not re-recorded.
+The repo is still bind-mounted into agent containers. All agents share one network. Image packages are not pinned. `max_steps` and `wall_s` are not enforced. `schedule` does not order by deadline. Eval recordings were not re-recorded.
 
-## What I would add with more time
+## Further work
 
-To harden and complete the system, I would:
+Possible improvements:
 
 - Sandboxing: replace ordinary containers with gVisor or Firecracker so tenant workloads do not share the host kernel.
-- Credentials and service identity: move the long-lived provider key out of the proxy into a vault, issue short-lived tokens through a broker, and use mutual TLS between the gateway, broker, and ledger.
+- Credentials and service identity: store the provider key in a vault and issue short-lived tokens through a broker. Use mutual TLS between services.
 - Availability and scale: add a Postgres replica and multi-host scheduling.
 - Identity and integrations: add OIDC, live mailbox connectors, and a web UI.
 - Memory limits: make runs skip mail older than the saved cursor, expire facts, and cap their size.

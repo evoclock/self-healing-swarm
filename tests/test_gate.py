@@ -1,14 +1,14 @@
 import json
 import os
+import threading
 from decimal import Decimal
 
 import psycopg
-import pytest
 
 import proxy.gate
 import proxy.service
 from proxy.app import begin_step, finish_step, resolve
-from proxy.providers import Cassette, Completion, estimate_usd, step_digest
+from proxy.providers import Cassette, Completion, Provider, step_digest
 from proxy.service import ProxyContext, dispatch
 from runtime.config import KNOWN_TOOLS
 from runtime.policy import RunPolicy
@@ -41,8 +41,8 @@ def query(tenant, sql, params=()):
         return conn.execute(sql, params).fetchall()
 
 
-def recorded(tmp_path, messages, text="ok"):
-    Cassette(tmp_path).put(step_digest(messages, []), Completion(text, 3, 1).to_json())
+def recorded(tmp_path, messages, text="ok", cost=None):
+    Cassette(tmp_path).put(step_digest(messages, []), Completion(text, 3, 1, cost).to_json())
 
 
 def test_open_run_stores_the_policy():
@@ -58,7 +58,7 @@ def test_proxy_tools_are_the_config_vocabulary_without_py_exec():
 def test_lying_budget_fields_are_ignored(tmp_path):
     token = opened("gate-budget", max_usd=Decimal("0.00001"))
     messages = [{"role": "user", "content": "budget probe"}]
-    recorded(tmp_path, messages)
+    recorded(tmp_path, messages, cost=Decimal("0.01"))
     status, body = post(context(tmp_path), "/v1/complete", {
         "token": token,
         "messages": messages,
@@ -80,7 +80,7 @@ def test_a_reserved_estimate_counts_against_the_cap(tmp_path):
     with psycopg.connect(URL, autocommit=True) as conn:
         begin_step(conn, "t-a", "gate-reserve", 1, "held", "primary", Decimal("0.004"), 0)
     messages = [{"role": "user", "content": "second step"}]
-    recorded(tmp_path, messages)
+    recorded(tmp_path, messages, cost=Decimal("0.002"))
     status, _body = post(context(tmp_path), "/v1/complete", {"token": token, "messages": messages, "model": "primary", "step_no": 2})
     assert status == 402
 
@@ -94,10 +94,8 @@ def test_local_is_priced_at_zero_so_a_dollar_cap_does_not_deny_it(tmp_path):
     assert body["text"] == "pong"
 
 
-def test_unknown_model_is_not_priced_at_zero(tmp_path):
+def test_unknown_model_is_refused(tmp_path):
     token = opened("gate-model")
-    with pytest.raises(KeyError):
-        estimate_usd("gpt-unknown", 1, 1)
     status, body = post(context(tmp_path), "/v1/complete", {
         "token": token, "messages": [{"role": "user", "content": "x"}], "model": "gpt-unknown", "step_no": 1,
     })
@@ -222,18 +220,83 @@ def test_same_generation_started_step_gets_202_and_no_provider_call(tmp_path):
     assert (status, body) == (202, {"in_progress": True})
 
 
-def test_stale_started_step_is_taken_over_and_marked_uncertain(tmp_path):
+def test_old_same_generation_started_step_stays_202(tmp_path):
     token = opened("gate-stale")
-    messages = [{"role": "user", "content": "dead holder"}]
+    messages = [{"role": "user", "content": "still held"}]
     digest = step_digest(messages, [])
-    recorded(tmp_path, messages)
     with psycopg.connect(URL, autocommit=True) as conn:
         begin_step(conn, "t-a", "gate-stale", 1, digest, "primary", Decimal("0.001"), 0)
         conn.execute("UPDATE steps SET started_at = now() - interval '31 seconds' WHERE run_id = 'gate-stale'")
+    before = query("t-a", "SELECT status, generation, cost_usd, started_at FROM steps WHERE run_id = 'gate-stale'")
     status, body = post(context(tmp_path), "/v1/complete", {"token": token, "messages": messages, "model": "primary", "step_no": 1})
-    assert status == 200
-    assert body["text"] == "ok"
-    assert query("t-a", "SELECT status, cost_uncertain FROM steps WHERE run_id = 'gate-stale'") == [("COMPLETED", True)]
+    assert (status, body) == (202, {"in_progress": True})
+    assert query("t-a", "SELECT status, generation, cost_usd, started_at FROM steps WHERE run_id = 'gate-stale'") == before
+
+
+def test_a_recorded_call_sends_a_trace_and_the_next_step_nests(tmp_path):
+    seen = []
+
+    def upstream(messages, tools, model, temperature=None, max_tokens=None, project_id=None, trace=None):
+        seen.append(trace)
+        return Completion("ok", 1, 1, Decimal("0.00001"), "11111111-1111-1111-1111-111111111111")
+
+    token = opened("gate-trace")
+    ctx = ProxyContext(URL, Cassette(tmp_path), "record", "test", upstream=upstream)
+    first, _body = post(ctx, "/v1/complete", {"token": token, "messages": [{"role": "user", "content": "one"}], "model": "primary", "step_no": 1})
+    second, _body = post(ctx, "/v1/complete", {"token": token, "messages": [{"role": "user", "content": "two"}], "model": "primary", "step_no": 2})
+    third, _body = post(ctx, "/v1/complete", {"token": token, "messages": [{"role": "user", "content": "local"}], "model": "local", "step_no": 3})
+    assert (first, second, third) == (200, 200, 200)
+    assert seen[0]["X-Merge-Trace-Id"] == "t-a.gate-trace"
+    assert seen[0]["X-Merge-Thread-Id"] == "t-a"
+    assert seen[0]["X-Merge-Turn-Id"] == "step-1"
+    assert "X-Merge-Parent-Span-Id" not in seen[0]
+    assert seen[1]["X-Merge-Parent-Span-Id"] == "11111111-1111-1111-1111-111111111111"
+    assert seen[1]["X-Merge-Turn-Id"] == "step-2"
+    assert seen[2] is None
+
+
+def test_one_provider_call_while_a_duplicate_waits(tmp_path, monkeypatch):
+    token = opened("gate-inflight")
+    messages = [{"role": "user", "content": "slow call"}]
+    recorded(tmp_path, messages, "once")
+    entered = threading.Event()
+    release = threading.Event()
+    calls = []
+    original = Provider.complete
+
+    def blocking(self, messages, tools, model, temperature=None, max_tokens=None, project_id=None, trace=None):
+        calls.append(model)
+        entered.set()
+        assert release.wait(5)
+        return original(
+            self, messages, tools, model, temperature=temperature, max_tokens=max_tokens, project_id=project_id, trace=trace
+        )
+
+    monkeypatch.setattr(Provider, "complete", blocking)
+    holder = {}
+
+    def run_holder():
+        holder["result"] = post(
+            context(tmp_path),
+            "/v1/complete",
+            {"token": token, "messages": messages, "model": "primary", "step_no": 1},
+        )
+
+    thread = threading.Thread(target=run_holder)
+    thread.start()
+    assert entered.wait(5)
+    status, body = post(
+        context(tmp_path),
+        "/v1/complete",
+        {"token": token, "messages": messages, "model": "primary", "step_no": 1},
+    )
+    assert (status, body) == (202, {"in_progress": True})
+    assert calls == ["primary"]
+    release.set()
+    thread.join(5)
+    assert holder["result"][0] == 200
+    assert holder["result"][1]["text"] == "once"
+    assert calls == ["primary"]
 
 
 def test_newer_generation_takes_over_and_the_late_finisher_writes_nothing(tmp_path):

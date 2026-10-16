@@ -5,7 +5,7 @@ import urllib.request
 
 
 class ProxyClient:
-    # 0.5 s per poll. Longer than the proxy's 30 s takeover so a dead holder is replaced, not waited on forever.
+    # 0.5 s per poll, about 90 seconds. A same-generation holder is not taken over when this ends.
     poll_limit = 180
 
     def __init__(self, base_url: str, token: str):
@@ -26,7 +26,7 @@ class ProxyClient:
         )
 
     def complete(self, messages, model: str, step_no: int) -> dict:
-        """No budget fields. The proxy reads the cap from the run and estimates the cost itself."""
+        """No budget fields. The proxy reads the cap from the run and charges usage.cost."""
         return self._retry(
             "POST",
             "/v1/complete",

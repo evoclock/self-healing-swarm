@@ -5,14 +5,17 @@ import psycopg
 import pytest
 
 from proxy.app import Call, Decision, begin_step, decide, finish_step, resolve, write_denial
+from decimal import Decimal
+
 from proxy.providers import (
     Cassette,
     Completion,
     Provider,
     ReplayMiss,
-    estimate_usd,
+    completion_from_payload,
     gateway_model,
     gateway_upstream,
+    merge_trace_headers,
     outbound_headers,
     step_digest,
 )
@@ -61,8 +64,7 @@ def test_loopback_proxy_port_is_denied():
 
 
 def test_budget_refusal():
-    estimate = estimate_usd("primary", 100_000, 0)
-    decision = decide(call(spent_usd=0.90, estimate_usd=estimate, max_usd=1.00))
+    decision = decide(call(spent_usd=Decimal("0.90"), estimate_usd=Decimal("0.20"), max_usd=Decimal("1.00")))
     assert decision.allow is False
     assert decision.reason == "budget"
 
@@ -156,8 +158,112 @@ def test_record_calls_the_gateway_and_stores_the_reply(tmp_path):
     assert result.text == "pong"
     assert result.tokens_in == 4
     assert client.chat.completions.kwargs["model"] == "zai/glm-5.3-flash"
+    assert "extra_headers" not in client.chat.completions.kwargs
     stored = Cassette(tmp_path).get(step_digest(messages, []))
     assert Completion.from_json(stored).text == "pong"
+
+
+def test_record_sends_the_tenant_project_on_the_gateway_call(tmp_path):
+    client = _chat_client()
+    messages = [{"role": "user", "content": "Reply with the single word pong."}]
+    Provider(Cassette(tmp_path), mode="record", upstream=gateway_upstream("not-a-key", client)).complete(
+        messages, [], "primary", project_id="5c910b17-02b3-4fd1-9887-99bc8f532ad5"
+    )
+    assert client.chat.completions.kwargs["extra_headers"]["X-Project-Id"] == "5c910b17-02b3-4fd1-9887-99bc8f532ad5"
+
+
+def test_trace_headers_name_the_tenant_run_and_step():
+    assert merge_trace_headers("t-a", "record-daily-brief", 3, "primary") == {
+        "X-Merge-Trace-Id": "t-a.record-daily-brief",
+        "X-Merge-Thread-Id": "t-a",
+        "X-Merge-Turn-Id": "step-3",
+        "X-Merge-Span-Name": "primary",
+    }
+
+
+def test_trace_headers_drop_an_invalid_parent():
+    bare = merge_trace_headers("t-a", "record-daily-brief", 4, "primary", "not a uuid")
+    assert "X-Merge-Parent-Span-Id" not in bare
+    nested = merge_trace_headers("t-a", "record-daily-brief", 4, "primary", "11111111-1111-1111-1111-111111111111")
+    assert nested["X-Merge-Parent-Span-Id"] == "11111111-1111-1111-1111-111111111111"
+
+
+def test_record_sends_trace_headers_with_the_project(tmp_path):
+    client = _chat_client()
+    messages = [{"role": "user", "content": "Reply with the single word pong."}]
+    trace = merge_trace_headers("t-a", "record-daily-brief", 3, "primary")
+    Provider(Cassette(tmp_path), mode="record", upstream=gateway_upstream("not-a-key", client)).complete(
+        messages, [], "primary", project_id="5c910b17-02b3-4fd1-9887-99bc8f532ad5", trace=trace
+    )
+    headers = client.chat.completions.kwargs["extra_headers"]
+    assert headers["X-Project-Id"] == "5c910b17-02b3-4fd1-9887-99bc8f532ad5"
+    assert headers["X-Merge-Trace-Id"] == "t-a.record-daily-brief"
+    assert headers["X-Merge-Span-Name"] == "primary"
+
+
+def test_local_call_does_not_send_trace_headers(tmp_path):
+    local = _chat_client()
+    messages = [{"role": "user", "content": "Reply with the single word pong."}]
+    trace = merge_trace_headers("t-a", "record-loop", 2, "local")
+    Provider(
+        Cassette(tmp_path),
+        mode="record",
+        upstream=gateway_upstream("gateway-key", clients={"local": local}),
+    ).complete(messages, [], "local", project_id="5c910b17-02b3-4fd1-9887-99bc8f532ad5", trace=trace)
+    assert "extra_headers" not in local.chat.completions.kwargs
+
+
+def test_request_id_stays_on_the_call_and_out_of_the_cassette(tmp_path):
+    class Raw:
+        headers = {"x-request-id": "11111111-1111-1111-1111-111111111111"}
+        text = '{"choices":[{"message":{"content":"pong"}}],"usage":{"prompt_tokens":4,"completion_tokens":1,"cost":"0.00001"}}'
+
+    class Completions:
+        def __init__(self):
+            self.with_raw_response = self
+
+        def create(self, **kwargs):
+            return Raw()
+
+    class Chat:
+        def __init__(self):
+            self.completions = Completions()
+
+    class Client:
+        def __init__(self):
+            self.chat = Chat()
+
+    messages = [{"role": "user", "content": "Reply with the single word pong."}]
+    result = Provider(Cassette(tmp_path), mode="record", upstream=gateway_upstream("not-a-key", Client())).complete(
+        messages, [], "primary", trace=merge_trace_headers("t-a", "record-daily-brief", 3, "primary")
+    )
+    assert result.request_id == "11111111-1111-1111-1111-111111111111"
+    stored = Cassette(tmp_path).get(step_digest(messages, []))
+    assert b"request_id" not in stored
+    assert b"11111111" not in stored
+
+
+def test_local_call_does_not_send_a_project_header(tmp_path):
+    local = _chat_client()
+    messages = [{"role": "user", "content": "Reply with the single word pong."}]
+    Provider(
+        Cassette(tmp_path),
+        mode="record",
+        upstream=gateway_upstream("gateway-key", clients={"local": local}),
+    ).complete(messages, [], "local", project_id="5c910b17-02b3-4fd1-9887-99bc8f532ad5")
+    assert "extra_headers" not in local.chat.completions.kwargs
+
+
+def test_usage_cost_is_kept_from_the_gateway_payload():
+    completion = completion_from_payload(
+        {
+            "choices": [{"message": {"content": "pong"}}],
+            "usage": {"prompt_tokens": 204, "completion_tokens": 199, "cost": 0.000052},
+        }
+    )
+    assert completion.cost_usd == Decimal("0.000052")
+    restored = Completion.from_json(completion.to_json())
+    assert restored.cost_usd == Decimal("0.000052")
 
 
 def test_provider_key_is_injected_and_not_taken_from_the_agent():

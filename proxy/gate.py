@@ -10,7 +10,6 @@ from runtime.policy import RunPolicy
 from runtime.scheduler import IllegalTransition, transition
 
 PROXY_TOOLS = frozenset({"mail.list", "mail.read", "docs.read", "memory.write", "draft.create"})
-TAKEOVER_SECONDS = 30
 
 
 @dataclass(frozen=True)
@@ -19,6 +18,7 @@ class Bound:
     run_id: str
     generation: int
     policy: RunPolicy
+    project_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -38,11 +38,18 @@ class Finished:
 def load_bound(conn, found: dict) -> Bound | None:
     """Read the run's stored policy once per request. The request body never supplies it."""
     conn.execute("SELECT set_config('app.tenant_id', %s, false)", (found["tenant_id"],))
-    row = conn.execute("SELECT max_usd, tools FROM runs WHERE id = %s", (found["run_id"],)).fetchone()
+    row = conn.execute(
+        """
+        SELECT runs.max_usd, runs.tools, tenants.gateway_project_id
+        FROM runs JOIN tenants ON tenants.tenant_id = runs.tenant_id
+        WHERE runs.id = %s
+        """,
+        (found["run_id"],),
+    ).fetchone()
     if row is None:
         return None
     policy = RunPolicy(Decimal(row[0]), frozenset(row[1]))
-    return Bound(found["tenant_id"], found["run_id"], found["generation"], policy)
+    return Bound(found["tenant_id"], found["run_id"], found["generation"], policy, row[2])
 
 
 def write_event(conn, tenant: str, run_id: str, event: str, detail: dict) -> None:
@@ -68,20 +75,19 @@ def claim_step(conn, bound: Bound, step_no: int, digest: str, model: str, estima
         conn.execute("SELECT 1 FROM runs WHERE id = %s FOR UPDATE", (run_id,))
         existing = conn.execute(
             """
-            SELECT status, response, generation, started_at,
-                   now() - started_at >= make_interval(secs => %s)
+            SELECT status, response, generation, started_at
             FROM steps WHERE run_id = %s AND step_no = %s AND arg_hash = %s
             """,
-            (TAKEOVER_SECONDS, run_id, step_no, digest),
+            (run_id, step_no, digest),
         ).fetchone()
         if existing is not None:
-            status, response, generation, started_at, stale = existing
+            status, response, generation, started_at = existing
             if status == "COMPLETED":
                 write_event(conn, tenant, run_id, "step_skipped", {"step_no": step_no})
                 return Finished(200, {"skipped": True, **_as_dict(response)})
-            if status == "STARTED" and generation > bound.generation:
-                return Finished(409, {"error": "stale_generation"})
-            if status == "STARTED" and generation == bound.generation and not stale:
+            if status == "STARTED" and generation >= bound.generation:
+                if generation > bound.generation:
+                    return Finished(409, {"error": "stale_generation"})
                 return Finished(202, {"in_progress": True})
         if estimate is not None:
             spent = conn.execute(
