@@ -4,7 +4,7 @@ This repo runs multi-tenant background agents. Each agent container runs as user
 
 The proxies share Postgres and nothing else. The proxy decides budget, tool access, draft flags, and whether a run succeeded. The agent sends a command. It cannot send a cap, a spend, a cost estimate, a tool list, or a domain list. If the request body has such fields, the proxy ignores them.
 
-Agents write drafts. An approver in the same tenant approves a send.
+Agents write drafts. An approver in the same tenant approves a send. A flagged draft (outside the tenant's domains, or with attachments) is refused by `approve` and needs the separate `approve_flagged`.
 
 ## System design
 
@@ -20,9 +20,9 @@ Resume does not call `open_run`, because `open_run` resets the run and deletes i
 
 A step's cost is `usage.cost` from the Gateway response. Replay reads that figure from the recording and compares it with the cap before serving the call. `local` has no Gateway charge, so a dollar cap does not deny it. An unknown model name gets 400.
 
-The cap check locks the run row and sums `steps.cost_usd`. Replay adds this recording's `usage.cost` to that sum. A live call adds nothing yet, so it is refused only when the stored sum is already past `max_usd`. The check commits before the provider call. A denial returns 402, writes a `budget` row to `audit_log` with the run id, and writes a `budget_denied` run event. After a live call, the step stores the returned `usage.cost`.
+The cap check locks the run row and sums `steps.cost_usd`. Replay adds this recording's `usage.cost` to that sum. A live call adds an upper-bound estimate first: prompt tokens (about 4 characters each) plus 512 output tokens, at the model's price per token (`proxy/providers.py`). A model with no price gets 400 `no_price`. The estimate is replaced by the returned `usage.cost` when the call finishes. The check commits before the provider call. A denial returns 402, writes a `budget` row to `audit_log` with the run id, and writes a `budget_denied` run event. After a live call, the step stores the returned `usage.cost`.
 
-`complete` applies the fault queue before the budget check and before the provider call. An armed fault returns 503 or 429 and does not touch the journal.
+`complete` applies the fault queue before the budget check and before the provider call. An armed fault returns 503 or 429 and does not touch the journal. A `tool_error` fault makes the next tool call return 500.
 
 ### Step journal
 
@@ -50,7 +50,9 @@ The brief runner appends `cites:` and the mail ids it listed. `_document` append
 
 ### Scheduling and limits
 
-`schedule` orders jobs by `job_id`. The host cap is 8 concurrent jobs, each tenant has its own cap, and the window is 90 minutes. A job that does not fit comes back escalated. With 200 ten-minute jobs, 72 are placed and 128 are escalated. `make test` calls `schedule`. `make drill` does not. `max_steps` and `wall_s` are parsed from the yaml and not enforced.
+`schedule` places jobs earliest deadline first, minute by minute, inside the host cap (8), each tenant's cap and any provider cap, over a 90-minute window. A job is escalated only when it can no longer finish by its deadline. 200 three-minute briefs due together all fit and spread across the window; 200 ten-minute jobs place 72 and escalate 128, because 8 slots for 90 minutes hold 72. `runtime.dispatch` starts the jobs placed at minute 0 in fresh containers, escalates predicted misses, and runs the lease watcher (`docker compose --profile tools up dispatch`). The drill calls the same `dispatch_once` and `watch_once`.
+
+Every proxy request renews the run's lease (15 s), and the proxy keeps renewing it while a provider or tool call is in flight. The watcher claims an expired run once (row lock, skip locked), kills its old container, and resumes it in a fresh one under a new token generation; the third expiry escalates. The runner checks `max_steps`, `max_tokens` (prompt estimate plus 512) and `wall_s` before every call; a breach stores `STOPPED_BUDGET` with `saved progress: <limit>`. A tool error retries three times with backoff (0.5, 1, 2 s), each attempt counting as a step, then goes back to the model. A hang is retried once, then escalated.
 
 ### Outbox
 
@@ -70,22 +72,37 @@ Adding `mail.list` to the doc-analyst yamls changed the doc-analyst config hash.
 
 The proxy prints one line per complete, tool, state, and event on its own stdout. `docker compose logs -f proxy-a proxy-b` follows those lines while the drill runs. A line names the trace as `tenant.run`, the step, the model or tool, and the cost or the denial. Replay does not call Gateway, so a drill does not appear in Gateway Logs.
 
-The kill scenario and the agent half of the escape scenario run in locked agent containers. The other agent scenarios run the runner inside the drill process, against proxy-a.
+Every agent scenario runs in a fresh locked agent container, against proxy-a.
 
 - `proxies`: both proxies answer health with different names.
-- `kill`: a container finishes steps 1 and 2 and is killed. The drill calls `on_lease_expired`, so `resume_count` is 1. It starts `swarm-drill-kill-2` and binds a second token at a new generation. The resumed run skips the completed steps, keeps their costs, and succeeds.
-- `provider`: the armed faults return 503 and then 429, and the runner falls back to `local`.
-- `injection`: the injection mail produces a flagged draft, the run succeeds, and the proxy writes one cursor.
+- `kill`: a container finishes steps 1 and 2 and is killed. Its lease lapses and `watch_once` claims the run, so `resume_count` is 1. It starts a fresh container and binds a second token at a new generation. The resumed run skips the completed steps, keeps their costs, and succeeds.
+- `provider`: the armed faults return 503 and then 429, and the runner falls back to `local` and logs `provider_fallback` marked simulated.
+- `injection`: the injection mail produces a flagged draft, ordinary approval refuses it, the run succeeds, and the proxy writes one cursor.
 - `escape`: three checks.
   - The drill posts a `py.exec` request containing code to write a marker under the proxy's `/src` and print `/etc/shadow`. The scenario requires `not_executed`, no shadow text in the response, and no marker file afterwards.
   - The drill starts two containers with the agent HostConfig on `swarm-agents`. One opens `/etc/shadow`. The other connects to example.com. Both must exit non-zero. The connect fails because the network is internal.
   - The agent's escape script runs in a locked container. The scenario requires one proxy-written `foreign_id` step for `mail.read` of `m-b-1`, which belongs to t-b, from a t-a run. The agent's `ESCALATED` state is reported but does not count as proof.
 - `budget`: the run is opened with `max_usd` 0.00001. The scenario requires `STOPPED_BUDGET` and one proxy budget denial in `audit_log`. The runner does not post `STOPPED_BUDGET` without a 402.
-- `hang`: a 30-second sleep with a 1-second timeout is retried once and cancelled.
+- `hang`: a 30-second sleep with a 1-second timeout is retried once, cancelled, and the run is `ESCALATED`.
 - `loop`: the same digest three times stores `STOPPED_LOOP` with the last text.
+- `document`: the doc agent for t-b reads the spreadsheet attachment and runs the fixed sheet program inside its container; the artifact carries `figures 4875`.
+- `tool_error`: two tool calls fail with 500; the runner retries with backoff and the run succeeds.
+- `dispatch`: `dispatch_once` starts two runs in deadline order in fresh containers (both succeed) and escalates one that cannot meet its deadline.
 - `eval_gate`: no model call. The scenario deletes the t-a daily-brief eval rows and scores the committed daily-brief recordings with no baseline. It writes that row. It then scores the weakened and the harmless configs against that mean and writes both rows before `load_config`. The weakened config fails the injection and cross-tenant cases and `load_config` refuses it. The harmless config scores 1.8 against 2.0, a delta of 0.2, and loads.
 - `empty`: the runner posts `SUCCEEDED` with an empty artifact and the proxy stores `FAILED`.
 - `send`: the first `deliver` sends once. The draft is reset to SENDING. A second `deliver` uses a fresh sink, finds the message id in the SMTP log, and skips sending.
+
+## Cost per agent per day
+
+From recorded runs (`docs/cost.md`): the daily brief is $0.00005844 a run and the document agent $0.00001464 a run. Both are scheduled daily for each of four tenants, so each brief agent costs $0.00005844 a day and each document agent $0.00001464 a day; all eight agents together cost $0.00029232 a day.
+
+## Deliverables
+
+- One command: `make drill` (no credentials; replays recordings). `make test` runs the unit tests and the sandbox probe.
+- Design doc: `docs/design.pdf` (2 pages), text in `docs/design.md`.
+- Drill output: `docs/drill-output.txt`, written by `make drill`.
+- Cost: `docs/cost.md`.
+- Video: recorded separately.
 
 ## Prerequisites
 

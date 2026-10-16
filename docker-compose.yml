@@ -137,6 +137,26 @@ services:
       - default
     command: ["bash", "-c", "pip install -q 'psycopg[binary]' pyyaml && python -m drill"]
 
+  dispatch:
+    image: python:3.12-slim
+    profiles: ["tools"]
+    depends_on:
+      proxy-a:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://app:app@postgres:5432/swarm
+      PYTHONPATH: /src
+      PROXY_A_URL: http://proxy-a:18894
+      AGENT_NETWORK: swarm-agents
+      HOST_REPO: ${HOST_REPO}
+    volumes:
+      - .:/src:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    working_dir: /src
+    networks:
+      - default
+    command: ["bash", "-c", "pip install -q 'psycopg[binary]' pyyaml && python -m runtime.dispatch"]
+
 networks:
   agents:
     name: swarm-agents

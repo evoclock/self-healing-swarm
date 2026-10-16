@@ -124,6 +124,11 @@ def tool(ctx: ProxyContext, conn, payload: dict, source_ip: str) -> tuple[int, d
     if bound is None:
         _note(ctx, "tool 403 token")
         return 403, {"error": "token"}
+    if ctx.faults and ctx.faults[0] == "tool_error":
+        ctx.faults.pop(0)
+        write_event(conn, bound.tenant_id, bound.run_id, "tool_error", {"simulated": True})
+        _note(ctx, f"tool 500 trace {bound.tenant_id}.{bound.run_id} fault tool_error")
+        return 500, {"error": "tool_error", "simulated": True}
     name = str(payload.get("name") or "")
     args = payload.get("args") or {}
     step_no = int(payload["step_no"])
@@ -219,6 +224,6 @@ def _complete_line(status, tenant, run_id, step_no, model, body, charge) -> str:
 
 
 def _pop_fault(ctx: ProxyContext, model: str) -> str | None:
-    if model != "primary" or not ctx.faults:
+    if model != "primary" or not ctx.faults or ctx.faults[0] == "tool_error":
         return None
     return str(ctx.faults.pop(0))

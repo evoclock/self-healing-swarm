@@ -167,7 +167,7 @@ def _model(client, config: AgentConfig, messages, step_no: int) -> tuple[str | N
             throttled = throttled or status == 429
             action, nxt = after_provider_pressure(errors, throttled, config.models, model)
             if action == "fallback":
-                client.event("provider_fallback", {"model": nxt, "simulated": True})
+                client.event("provider_fallback", {"model": nxt, "simulated": bool(result.get("simulated"))})
                 model = nxt
             elif action == "escalate":
                 client.state("ESCALATED", "provider")
@@ -225,8 +225,9 @@ def _hang(client, run_id: str, executor) -> dict:
             attempts += 1
             client.event("hang_" + action, {"attempt": attempts, "error": type(exc).__name__})
             if action == "cancel":
-                client.state("FAILED", "hang cancelled")
-                return {"state": "FAILED", "artifact": "hang cancelled"}
+                # The retry hung too: hand to a person.
+                client.state("ESCALATED", "hang cancelled")
+                return {"state": "ESCALATED", "artifact": "hang cancelled"}
             continue
         client.state("SUCCEEDED", "hang clear")
         return {"state": "SUCCEEDED"}

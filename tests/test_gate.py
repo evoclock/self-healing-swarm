@@ -400,3 +400,13 @@ def test_the_lease_is_renewed_while_a_provider_call_is_in_flight(tmp_path):
     })
     assert status == 200
     assert seen == [True]
+
+
+def test_an_armed_tool_error_fails_one_tool_call_and_leaves_the_model_fault_queue(tmp_path):
+    token = opened("gate-tool-fault")
+    ctx = context(tmp_path, ["tool_error", "error"])
+    status, body = post(ctx, "/v1/tool", {"token": token, "name": "mail.list", "args": {}, "step_no": 1})
+    assert status == 500 and body["simulated"] is True
+    status, _body = post(ctx, "/v1/tool", {"token": token, "name": "mail.list", "args": {}, "step_no": 1})
+    assert status == 200
+    assert ctx.faults == ["error"]

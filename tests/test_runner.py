@@ -131,10 +131,11 @@ def test_budget_stops_only_on_a_proxy_402():
     assert execute(allowed, config(), "run-budget", "budget")["state"] == "FAILED"
 
 
-def test_hang_events():
+def test_hang_after_one_retry_escalates():
     fake = Fake([])
     result = execute(fake, config(), "run-hang", "hang", Executor())
-    assert result["state"] == "FAILED"
+    assert result["state"] == "ESCALATED"
+    assert fake.states[-1][0] == "ESCALATED"
     assert fake.events == ["hang_retry", "hang_cancel"]
 
 
@@ -250,3 +251,22 @@ def test_tool_retries_count_as_steps():
     result = execute(fake, limited(max_steps=3), "r-retry-steps", "brief", sleep=lambda _s: None)
     assert result["state"] == "STOPPED_BUDGET"
     assert len(fake.tools) == 3
+
+
+class Recording(Fake):
+    def __init__(self, replies):
+        super().__init__(replies)
+        self.details = []
+
+    def event(self, event, detail):
+        self.details.append((event, detail))
+        return super().event(event, detail)
+
+
+def test_fallback_is_marked_simulated_only_when_the_proxy_says_so():
+    real = Recording([{"status": 503}, {"status": 429}])
+    execute(real, config(), "r-real", "brief")
+    fake = Recording([{"status": 503, "simulated": True}, {"status": 429, "simulated": True}])
+    execute(fake, config(), "r-fake", "brief")
+    assert [d for e, d in real.details if e == "provider_fallback"][0]["simulated"] is False
+    assert [d for e, d in fake.details if e == "provider_fallback"][0]["simulated"] is True

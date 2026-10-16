@@ -26,7 +26,8 @@ from runtime.docker_api import (
 )
 from runtime.policy import RunPolicy
 from runtime.runs import bind_token, connect, events, open_run, record_container, reset_run, run_row, step_costs
-from runtime.scheduler import load_config
+from runtime.dispatch import dispatch_once, escalate_run, launch_run
+from runtime.scheduler import Job, load_config
 from runtime.watcher import resume_in_container, watch_once
 
 BRIEF = "agents/t-a/daily_brief.yaml"
@@ -54,6 +55,8 @@ def main() -> int:
         ("hang", scenario_hang),
         ("loop", scenario_loop),
         ("document", scenario_document),
+        ("tool_error", scenario_tool_error),
+        ("dispatch", scenario_dispatch),
         ("eval_gate", scenario_eval),
         ("empty", scenario_empty),
         ("send", scenario_send),
@@ -222,7 +225,7 @@ def scenario_budget() -> tuple[bool, str]:
 
 def scenario_hang() -> tuple[bool, str]:
     row, ev, result = _run("drill-hang", "t-a", "daily-brief", BRIEF, "hang", [])
-    ok = "hang_cancel" in ev and row["state"] == "FAILED"
+    ok = "hang_cancel" in ev and row["state"] == "ESCALATED"
     return ok, f"run_id drill-hang state {row['state']}\nevents {ev}"
 
 
@@ -245,6 +248,52 @@ def scenario_document() -> tuple[bool, str]:
     ok = row["state"] == "SUCCEEDED" and "figures " in (row["artifact"] or "")
     figures = next((line for line in (row["artifact"] or "").splitlines() if line.startswith("figures ")), "")
     return ok, f"run_id drill-document state {row['state']} {figures}\nevents {ev}" + ("" if ok else f"\n{result}")
+
+
+def scenario_tool_error() -> tuple[bool, str]:
+    """Two tool calls fail with 500; the agent retries with backoff and the run still succeeds."""
+    row, ev, _result = _run("drill-tool-error", "t-a", "daily-brief", BRIEF, "brief", ["tool_error", "tool_error"])
+    ok = row["state"] == "SUCCEEDED" and ev.count("tool_retry") == 2 and ev.count("tool_error") == 2
+    return ok, f"run_id drill-tool-error state {row['state']}\nevents {ev}"
+
+
+def scenario_dispatch() -> tuple[bool, str]:
+    """dispatch_once, the code the dispatch service loops over: deadline order, start in containers, escalate a miss."""
+    conn = connect(os.environ["DATABASE_URL"])
+    plan = {
+        "drill-dispatch-brief": ("t-a", "daily-brief", BRIEF, Job("drill-dispatch-brief", "t-a", 2, deadline=30)),
+        "drill-dispatch-doc": ("t-b", "doc-analyst", DOC, Job("drill-dispatch-doc", "t-b", 2, deadline=20)),
+        "drill-dispatch-late": ("t-c", "daily-brief", "agents/t-c/daily_brief.yaml", Job("drill-dispatch-late", "t-c", 2, deadline=1)),
+    }
+    for run_id, (tenant, *_rest) in plan.items():
+        reset_run(conn, tenant, run_id)
+    started = []
+
+    def launch(job):
+        tenant, agent_id, path, _job = plan[job.job_id]
+        started.append((tenant, job.job_id, launch_run(conn, tenant, job.job_id, agent_id, path, None, _policy(path))))
+
+    def escalate(job):
+        tenant, agent_id, path, _job = plan[job.job_id]
+        escalate_run(conn, tenant, job.job_id, agent_id, path, _policy(path))
+
+    dispatch_once([item[3] for item in plan.values()], {"t-a": 1, "t-b": 1, "t-c": 1}, launch, escalate)
+    try:
+        for tenant, run_id, _cid in started:
+            _wait_state(conn, tenant, run_id, TERMINAL)
+    finally:
+        for _tenant, _run_id, cid in started:
+            remove_container(cid)
+    states = {run_id: run_row(conn, plan[run_id][0], run_id)["state"] for run_id in plan}
+    order = [run_id for _tenant, run_id, _cid in started]
+    ok = (
+        order == ["drill-dispatch-doc", "drill-dispatch-brief"]
+        and states["drill-dispatch-doc"] == "SUCCEEDED"
+        and states["drill-dispatch-brief"] == "SUCCEEDED"
+        and states["drill-dispatch-late"] == "ESCALATED"
+        and "deadline_escalated" in events(conn, "t-c", "drill-dispatch-late")
+    )
+    return ok, f"started in order {order}\nstates {states}"
 
 
 def scenario_eval() -> tuple[bool, str]:

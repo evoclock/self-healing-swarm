@@ -21,7 +21,7 @@ budget PASS
 run_id drill-budget state STOPPED_BUDGET artifact saved progress proxy denials 1 estimate 0.00005844
 events ['step_completed', 'step_completed', 'budget_denied', 'state']
 hang PASS
-run_id drill-hang state FAILED
+run_id drill-hang state ESCALATED
 events ['hang_retry', 'hang_cancel', 'state']
 loop PASS
 run_id drill-loop state STOPPED_LOOP artifact "Loop probe" can mean a few different things — here's the most common interpretation: a small utility that detects cycles (infinite loops) in a data structure or sequence, using Floyd's tortoise-and-hare algorithm. If you meant something else (network loop detection, a debugger, etc.), let me know.
@@ -29,6 +29,12 @@ events ['step_completed', 'step_completed', 'step_completed', 'state']
 document PASS
 run_id drill-document state SUCCEEDED figures 4875
 events ['step_completed', 'step_completed', 'step_completed', 'state']
+tool_error PASS
+run_id drill-tool-error state SUCCEEDED
+events ['tool_error', 'tool_retry', 'tool_error', 'tool_retry', 'step_completed', 'step_completed', 'step_completed', 'step_completed', 'state']
+dispatch PASS
+started in order ['drill-dispatch-doc', 'drill-dispatch-brief']
+states {'drill-dispatch-brief': 'SUCCEEDED', 'drill-dispatch-doc': 'SUCCEEDED', 'drill-dispatch-late': 'ESCALATED'}
 eval_gate PASS
 baseline mean 2.0 promoted True
 worse exit 1
