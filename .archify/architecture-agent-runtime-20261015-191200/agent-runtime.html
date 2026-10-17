@@ -5752,7 +5752,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <h3>Not building, and hardening</h3>
         </div>
         <ul>
-          <li>Not built: deadline scheduling, cursor reads, live connectors, web UI, OIDC, replica, panel</li>
+          <li>Not built: live connectors, web UI, OIDC, replica, panel</li>
           <li>Shared kernel: no gVisor or microVMs; a kernel exploit could reach other tenants</li>
           <li>Weakest part: the proxy holds the provider key, the tenant map, and the budget</li>
           <li>1 Detect leaks: canary IDs and a fuzzer</li>
