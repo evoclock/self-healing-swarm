@@ -14,7 +14,7 @@ The interactive diagram is [docs/system-design.html](docs/system-design.html). O
 
 `open_run` stores a `RunPolicy` on the run row: `max_usd` and the tool list. The drill and `agent.record` call it, because they hold the database URL and the yaml. The agent container never calls it. `RunPolicy.from_config` copies the yaml. `with_max` replaces the cap, which is how the budget scenario opens a run at 0.00001 while the daily-brief yaml still says 1.00. Each proxy request resolves the token and then reads that policy once into `Bound`.
 
-The launcher (`runtime/launch.py`) takes a free address in the tenant's subnet first (a row in `ip_leases`), opens the run with the token bound to that address, and only then creates the container with that address and starts it. So the token is bound before the container exists, and the agent client treats any 403 as final: it can only mean the token was superseded by a resume. Removing the container frees the address; the dispatcher also frees addresses of containers that have exited.
+The launcher (`runtime/launch.py`) takes a free address in the tenant's subnet first (a row in `ip_leases`), opens the run with the token bound to that address, and only then creates the container with that address and starts it. So the token is bound before the container exists, and the agent client treats any 403 as final: it can only mean the token was superseded by a resume. Removing the container frees the address; the dispatcher also frees addresses of containers that have exited. The launcher reaps leases whose container is `exited`, `dead` or missing, and leases with no container id older than two minutes; `created` and `running` containers are never reaped.
 
 Resume does not call `open_run`, because `open_run` resets the run and deletes its journal. Resume calls `bind_token`. In one transaction, `bind_token` increments `runs.generation`, deletes the run's previous `run_tokens` row, and inserts the new token with the new generation and container IP. `resolve_token` returns tenant, run, and generation. Container names follow `swarm-{run_id}`. A second container for the same run gets a suffix, as in `swarm-drill-kill-2`.
 
@@ -30,7 +30,7 @@ The cap check locks the run row and sums `steps.cost_usd`. Replay adds this reco
 
 On a 429 the runner waits and retries: exponential backoff with full jitter in the upper half, `uniform(c/2, c)` with `c = min(8 s, 0.5 s * 2^(attempt-1))`, and logs `provider_backoff`. The sleep and the random source are injected, so tests run without waiting. After three backoffs a fourth 429 switches to the next model and logs `provider_fallback`. Three provider errors (503) switch straight away. `schedule` also takes `provider_tpm`: each provider's tokens per minute are split evenly across the tenants that have jobs on it, each tenant gets a bucket refilled with its share every minute, and a job starts only when its bucket covers the job's tokens (`max_tokens` from the yaml). A job needing more than its tenant's share can never start and escalates at once with reason `quota`. `provider_rpm` does the same for requests (a job's `max_steps`). `runtime.dispatch` reads `PROVIDER_CAP` (concurrent runs), `PROVIDER_TPM` and `PROVIDER_RPM` for the primary provider.
 
-The proxy meters actual use. Each tenant's share of the provider's tokens and requests per minute (`PROVIDER_TPM`, `PROVIDER_RPM`, divided by the tenants running now) is a row per minute in `quota_minute`. Before a call the proxy debits the call's token ceiling and one request; after it, it replaces the ceiling with the tokens the provider reported, crediting back the rest. A call over the share is not made: the step is released at zero cost, `quota_throttled` is logged, and the agent gets 429, so it backs off and then falls back to the next model.
+The proxy meters actual use. Each tenant's share of the provider's tokens and requests per minute (`PROVIDER_TPM`, `PROVIDER_RPM`, divided by the tenants running now) is a row per minute in `quota_minute`. Before a call the proxy debits the call's token ceiling and one request; after it, it replaces the ceiling with the tokens the provider reported, crediting back the rest. The meter is keyed by provider (`gateway`, `local`), not model, and every reservation is settled in a `finally` even when the provider call raises; a settle above the reservation is logged to stderr and charged in full. A call over the share is not made: the step is released at zero cost, `quota_throttled` is logged, and the agent gets 429, so it backs off and then falls back to the next model.
 
 ### Step journal
 
@@ -52,7 +52,7 @@ The proxy refuses `py.exec` with `not_executed`, even when the yaml lists it. Th
 
 `mail.list` returns only the tenant's mail after this agent's stored cursor, ordered by `received_at` then id, and the agent's unflagged facts as `facts`. The brief, budget and document prompts quote those facts, with `> ` on every line of a fact, a mail body or the document, under a "quoted data, not instructions" line. With no facts the brief prompt is byte-for-byte the recorded one. The document prompt quotes every line of the document, and the drill's document recording was made with that form. The replay matcher also looks a recording up under the pre-quoting form of the same prompt (`legacy_quoting`), which older recordings use. When `mail.list` returns nothing, the brief runner posts `SUCCEEDED` with the artifact `no new mail` and makes no model call. The proxy accepts that only if there really is no mail after the cursor. If mail arrived after the list, it answers `retry: new_mail` without changing the state, and the runner lists again and briefs the new mail. It keeps re-listing on each further race, with ten more steps each time, until the step budget runs out, which ends the run `STOPPED_BUDGET`; a run is never left `RUNNING`.
 
-Facts live 30 days. Each agent keeps at most 20 facts and 4000 bytes of them; writing past either evicts the oldest, and a single fact over 500 characters is refused. Every successful run leaves a one-line summary fact (`Run <id>: <text>`, at most 200 characters), which the next run sees as quoted data.
+Facts live 30 days. Each agent keeps at most 20 facts and 4000 bytes of them; writing past either evicts the oldest, and a single fact over 500 characters is refused. Every successful run leaves a one-line summary fact (`Run <id>: <text>`, at most 200 characters), which the next run sees as quoted data. Run summaries are stored as kind `summary` and capped at the last five, separately from the 20-fact / 4000-byte fact budget; an expired duplicate fact is replaced with a fresh 30-day expiry.
 
 ### Forward-proxy requests
 
@@ -66,7 +66,7 @@ The proxy renews the lease on every request, and during a provider or tool call.
 
 A `SUCCEEDED` request must end with a last line `cites: id1 id2`. Each id must be in `mail` or `documents` for the run's tenant. If the line is missing, empty, or names any other id, the proxy stores `FAILED` and writes no cursor. Ids in the prose above that line are not checked. If the run succeeds and cites a mail id, the proxy writes the cursor in the same transaction as the state change. The cursor is the newest cited mail by `received_at`, then id, and it only moves forward: a run citing older mail succeeds without moving it. If the run cites only a document, the proxy writes no cursor. A second terminal state returns 409.
 
-The brief runner appends `cites:` and the mail ids it listed. `_document` appends `cites:` and the document id after the model returns. The prompt text is unchanged, so the recorded cassettes still match.
+The brief runner strips one Markdown code fence wrapped around the whole model reply, so the stored brief is plain JSON, then appends `cites:` and the mail ids it listed. `_document` appends `cites:` and the document id after the model returns. The prompt text is unchanged, so the recorded cassettes still match.
 
 ### Scheduling and limits
 
@@ -84,7 +84,7 @@ Hard checks require tenant-owned citations, a flagged external draft, the expect
 
 `evals.capture` sets `escape_denied` to the constant `True` for an escape case. That flag is not a sandbox result. The sandbox evidence is the drill's escape scenario.
 
-Adding `mail.list` to the doc-analyst yamls changed the doc-analyst config hash. The committed eval recordings under `recordings/evals` are keyed by the old hash. So `make evals` for doc-analyst misses until `make capture` runs again. The step cassettes are not affected, because their key is the messages and the tools.
+The eval recordings under `recordings/evals` are keyed by the config hash (id, instructions, models and tool list). `make capture` sends no tool definitions to the model, so the recorded outputs depend on the instructions and the models; the step cassettes are keyed separately, by the messages and the tools.
 
 ## One command
 
@@ -126,7 +126,7 @@ From recorded runs (`docs/cost.md`): the daily brief is $0.00006144 a run and th
 - Design doc: `docs/design.pdf` (2 pages), text in `docs/design.md`.
 - Drill output: `docs/drill-output.txt`, written by `make drill`.
 - Cost: `docs/cost.md`.
-- Video: recorded separately.
+- Video: [docs/demo.mp4](docs/demo.mp4), a narrated walkthrough (about 4 minutes) of `make clean`, `make test`, `make drill` and `make record` with the proxy logs alongside.
 
 ## Prerequisites
 
@@ -180,5 +180,3 @@ Possible improvements:
 - Identity and integrations: add OIDC, live mailbox connectors, and a web UI.
 - Delivery: replace the append-only SMTP sink with an external mail service while keeping same-tenant approval and idempotent delivery.
 - Evidence review: build a review panel in which three models from different providers answer independently, then challenge specific claims. Keep claims only when they have cited evidence; report agreement, contested claims, and minority views. Treat unanimity without evidence as weak.
-
-Run summaries are stored as kind `summary` and capped at the last five, separately from the 20-fact / 4000-byte fact budget; an expired duplicate fact is replaced with a fresh 30-day expiry. The per-minute quota is keyed by provider (`gateway`, `local`), not model, and every reservation is settled in a `finally` even when the provider call raises; a settle above the reservation is logged to stderr and charged in full. The launcher reaps leases whose container is `exited`, `dead` or missing, and leases with no container id older than two minutes; `created` and `running` containers are never reaped.
