@@ -1,8 +1,6 @@
-Recorded token counts, and where a real dollar amount comes from.
-
 ## Cost per agent per day
 
-From the recorded runs below. Each agent runs once a day (`schedule.cadence: daily` in every yaml), one daily brief and one document agent per tenant, four tenants.
+From the recorded token counts and costs below. Each agent runs once a day (`schedule.cadence: daily` in every yaml), one daily brief and one document agent per tenant, four tenants.
 
 - Daily brief: $0.00006144 a run × 1 run a day = $0.00006144 per agent per day. Four tenants: 4 × $0.00006144 = $0.00024576 a day.
 - Document agent: $0.00001668 a run × 1 run a day = $0.00001668 per agent per day. Four tenants: 4 × $0.00001668 = $0.00006672 a day.

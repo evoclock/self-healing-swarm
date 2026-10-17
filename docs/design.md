@@ -1,6 +1,6 @@
 # Multi-tenant background agents
 
-Julen Gamboa. Principal AI Engineer take-home. 14 Oct 2026.
+evoclock. Principal AI Engineer take-home. 14 Oct 2026.
 
 ## Solution design
 
@@ -37,7 +37,7 @@ The container can talk to the proxy and nothing else. Its run token names the ru
 
 ## Failure and resume
 
-Each step is keyed by `run_id`, `step_no` and a hash of messages and tool arguments; the model is not in the key, so a run can switch model mid-flight. The proxy writes `STARTED` before calling out and `COMPLETED` or `FAILED` before replying. Postgres has its own container, so a killed worker leaves the journal intact. A run is `SUCCEEDED` only if its artifact cites real message IDs from its own tenant; no artifact means `FAILED`.
+Each step is keyed by `run_id`, `step_no` and a hash of the messages and the tools; the model is not in the key, so a run can switch model mid-flight. The proxy writes `STARTED` before calling out and `COMPLETED` or `FAILED` before replying. Postgres has its own container, so a killed worker leaves the journal intact. A run is `SUCCEEDED` only if its artifact cites real message IDs from its own tenant; no artifact means `FAILED`.
 
 Every failure ends in one of three logged outcomes:
 
