@@ -41,6 +41,8 @@ def main() -> None:
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
+            if status == 429 and isinstance(payload, dict) and payload.get("retry_after_s") is not None:
+                self.send_header("Retry-After", str(int(-(-float(payload["retry_after_s"]) // 1))))
             self.end_headers()
             self.wfile.write(body)
 

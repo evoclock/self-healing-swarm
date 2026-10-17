@@ -49,6 +49,7 @@ def main() -> int:
         ("proxies", check_proxies),
         ("kill", scenario_kill),
         ("provider", scenario_provider),
+        ("daily_limit", scenario_daily_limit),
         ("injection", scenario_injection),
         ("escape", scenario_escape),
         ("budget", scenario_budget),
@@ -130,6 +131,13 @@ def scenario_provider() -> tuple[bool, str]:
     row, ev, result = _run("drill-provider", "t-a", "daily-brief", BRIEF, "brief", ["error", "429", "429", "429", "429"])
     ok = row["state"] == "SUCCEEDED" and ev.count("provider_backoff") == 3 and "provider_fallback" in ev
     return ok, f"run_id drill-provider state {row['state']}\nevents {ev}\n{result}"
+
+
+def scenario_daily_limit() -> tuple[bool, str]:
+    """Merge's free_tier_daily_limit 429: no retry, no other Gateway model, straight to local."""
+    row, ev, result = _run("drill-daily", "t-a", "daily-brief", BRIEF, "brief", ["429_daily"])
+    ok = row["state"] == "SUCCEEDED" and "provider_daily_limit" in ev and "provider_backoff" not in ev
+    return ok, f"run_id drill-daily state {row['state']}\nevents {ev}\n{result}"
 
 
 def scenario_injection() -> tuple[bool, str]:

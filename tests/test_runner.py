@@ -3,7 +3,7 @@ import subprocess
 from agent.client import ProxyClient
 from agent.loop import after_provider_pressure
 from agent.prompts import external_recipient
-from agent.runner import execute
+from agent.runner import execute, strip_code_fence
 from agent.tools import SHEET_PROGRAM
 from proxy.providers import OUTPUT_CAP
 from runtime.citations import parse_cites
@@ -116,6 +116,24 @@ def test_brief_ends_with_a_cites_line_and_does_not_write_the_cursor():
     assert state == "SUCCEEDED"
     assert parse_cites(artifact) == ("m-a-1",)
     assert not any(name == "memory.write" for name, _args in fake.tools)
+
+
+def test_brief_strips_a_json_code_fence_before_storing():
+    reply = '```json\n{"cited_ids": ["m-a-1"], "draft": null, "text": "Ship it (m-a-1)."}\n```'
+    fake = Fake([{"status": 200, "text": reply}])
+    execute(fake, config(), "run-fence", "brief")
+    state, artifact = fake.states[-1]
+    assert state == "SUCCEEDED"
+    assert artifact.startswith('{"cited_ids"')
+    assert "```" not in artifact
+    assert parse_cites(artifact) == ("m-a-1",)
+
+
+def test_strip_code_fence_leaves_unfenced_text_alone():
+    assert strip_code_fence('{"text": "x"}') == '{"text": "x"}'
+    assert strip_code_fence("```\n{}\n```") == "{}"
+    assert strip_code_fence("brief with ``` inside") == "brief with ``` inside"
+    assert strip_code_fence(None) is None
 
 
 def test_document_sums_on_stdin_and_cites_the_document():
@@ -477,3 +495,77 @@ def test_repeated_new_mail_races_end_terminal_not_running():
     result = execute(fake, config(), "run-race-forever", "brief", Executor())
     assert result["state"] == "STOPPED_BUDGET"
     assert fake.states[-1][0] == "STOPPED_BUDGET" and "saved progress" in fake.states[-1][1]
+
+
+def test_retry_after_lengthens_the_wait_and_is_capped_at_sixty_seconds():
+    fake = Fake([{"status": 429, "retry_after_s": 5}, {"status": 429, "retry_after_s": 500}, {"status": 200, "text": "ok"}])
+    slept = []
+    execute(fake, config(), "run-ra", "brief", sleep=slept.append, uniform=lambda low, high: high)
+    assert slept == [5.0, 60.0]
+
+
+def test_proxy_quota_429_retry_after_does_not_drive_the_wait():
+    fake = Fake([{"status": 429, "error": "quota", "retry_after_s": 59}, {"status": 429, "error": "quota", "retry_after_s": 58}, {"status": 200, "text": "ok"}])
+    slept = []
+    execute(fake, config(), "run-quota-ra", "brief", sleep=slept.append, uniform=lambda low, high: high)
+    assert slept == [0.5, 1.0]
+
+
+def test_backoff_wins_when_retry_after_is_shorter():
+    from agent.loop import throttle_delay
+
+    assert throttle_delay(3, lambda low, high: high, 0.1) == 2.0
+    assert throttle_delay(1, lambda low, high: high, "junk") == 0.5
+
+
+def test_daily_limit_skips_retry_and_falls_back_to_local():
+    fake = Fake([{"status": 429, "error": "free_tier_daily_limit", "retry_after_s": 3600}, {"status": 200, "text": "brief"}])
+    slept = []
+    result = execute(fake, config(), "run-dl", "brief", sleep=slept.append, uniform=lambda low, high: high)
+    assert result["state"] == "SUCCEEDED"
+    assert slept == []
+    assert "provider_daily_limit" in fake.events
+    assert "provider_backoff" not in fake.events
+
+
+def test_daily_limit_without_a_non_gateway_model_escalates():
+    from agent.loop import after_daily_limit
+
+    assert after_daily_limit(("primary",), frozenset({"primary"})) == ("escalate", None)
+    assert after_daily_limit(("primary", "local"), frozenset({"primary"})) == ("fallback", "local")
+
+
+def test_sdk_rate_limit_maps_to_a_429_with_code_and_retry_after():
+    import httpx2 as httpx
+    from openai import RateLimitError
+
+    from proxy.providers import ProviderThrottled, gateway_upstream
+
+    request = httpx.Request("POST", "https://api-gateway.merge.dev/v1/chat/completions")
+    response = httpx.Response(429, headers={"retry-after": "7"}, request=request)
+    error = RateLimitError("limit", response=response, body={"error": {"code": "free_tier_daily_limit"}})
+
+    class Completions:
+        def create(self, **kwargs):
+            raise error
+
+    class Client:
+        chat = type("Chat", (), {"completions": Completions()})()
+
+    upstream = gateway_upstream("k", client=Client())
+    try:
+        upstream([{"role": "user", "content": "x"}], [], "primary")
+    except ProviderThrottled as exc:
+        assert exc.code == "free_tier_daily_limit"
+        assert exc.retry_after_s == 7.0
+    else:
+        raise AssertionError("no ProviderThrottled")
+
+
+def test_gateway_clients_are_opened_without_sdk_retries():
+    import inspect
+
+    from proxy import providers
+
+    source = inspect.getsource(providers.gateway_upstream)
+    assert source.count("max_retries=0") == 2

@@ -44,6 +44,28 @@ def backoff_delay(attempt: int, uniform, base: float = 0.5, cap: float = BACKOFF
     return uniform(ceiling / 2, ceiling)
 
 
+RETRY_AFTER_CAP_S = 60.0
+GATEWAY_DAILY_LIMIT = "free_tier_daily_limit"
+
+
+def throttle_delay(attempt: int, uniform, retry_after_s=None) -> float:
+    """Wait the longer of the jittered backoff and the provider's Retry-After, Retry-After capped at 60 s."""
+    delay = backoff_delay(attempt, uniform)
+    try:
+        hinted = min(RETRY_AFTER_CAP_S, max(0.0, float(retry_after_s)))
+    except (TypeError, ValueError):
+        hinted = 0.0
+    return max(delay, hinted)
+
+
+def after_daily_limit(models: tuple[str, ...], gateway_models: frozenset[str]) -> tuple[str, str | None]:
+    """free_tier_daily_limit: never retry, never another Gateway model. First non-Gateway model, else escalate."""
+    for model in models:
+        if model not in gateway_models:
+            return ("fallback", model)
+    return ("escalate", None)
+
+
 def is_loop(recent_digests: tuple[str, ...], steps_without_new_data: int) -> bool:
     if len(recent_digests) >= 3 and len(set(recent_digests[-3:])) == 1:
         return True

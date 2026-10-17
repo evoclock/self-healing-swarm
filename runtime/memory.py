@@ -1,4 +1,4 @@
-# Facts (including run summaries) live FACT_TTL_DAYS. Each agent keeps at most MAX_FACTS of them and MAX_FACT_BYTES
+# Facts and run summaries live FACT_TTL_DAYS. Each agent keeps at most MAX_FACTS facts and MAX_FACT_BYTES
 # in total; writing past either evicts the oldest. One fact is at most MAX_FACT_CHARS.
 FACT_TTL_DAYS = 30
 MAX_FACTS = 20

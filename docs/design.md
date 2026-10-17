@@ -25,7 +25,7 @@ Agents give a deadline, not a start minute, so 200 briefs due at 07:30 spread ac
 - **Provider:** requests and tokens per minute. When full, a run waits or switches model. A self-hosted model is one more provider, sized by its batch slots.
 - **Tenant:** each tenant has a concurrency limit, and it says how many of its runs happen at once.
 - **Host:** 8 containers, each with 0.5 CPU and 512 MB of RAM.
-- **Rate limits:** runs start on the API. On a 429 the agent retries with exponential backoff and jitter; if throttling continues, it falls back to the next model in the config. Each provider's token and request quota is split across tenants, and runs are capped at each provider's concurrency.
+- **Rate limits:** runs start on the API. On a 429 the agent retries with exponential backoff and jitter, waiting at least an upstream `Retry-After` (capped at 60 s; the proxy's own quota 429 does not set the wait), and never retries `free_tier_daily_limit`; if throttling continues, it falls back to the next model in the config. Each provider's token and request quota is split across tenants, and runs are capped at each provider's concurrency.
 
 If the scheduler predicts a missed deadline, it escalates to a person.
 
@@ -37,13 +37,13 @@ The container can talk to the proxy and nothing else. Its run token names the ru
 
 ## Failure and resume
 
-Each step is keyed by `run_id`, `step_no` and a hash of messages and tool arguments; the model is not in the key, so a run can switch model mid-flight. The proxy writes `STARTED` before calling out and `COMPLETED` or `FAILED` before replying. Postgres has its own container, so a killed worker leaves the journal intact. A run is `SUCCEEDED` only if its artifact cites real message IDs from its own tenant; no artifact means `FAILED`.
+Each step is keyed by `run_id`, `step_no` and a hash of the messages and the tools; the model is not in the key, so a run can switch model mid-flight. The proxy writes `STARTED` before calling out and `COMPLETED` or `FAILED` before replying. Postgres has its own container, so a killed worker leaves the journal intact. A run is `SUCCEEDED` only if its artifact cites real message IDs from its own tenant; no artifact means `FAILED`.
 
 Every failure ends in one of three logged outcomes:
 
 1. **Auto-resume.** A killed worker resumes in a new container with the same `run_id` once the lease frees, skipping completed steps. Tool errors retry 3 times, then go to the model. A hang is cancelled and retried once. Three provider errors, or throttling past backoff, switch to the next model and log `provider_fallback`. Sandbox denials are logged and the run continues.
 2. **Rerun with logged cost.** A step that died while `STARTED` reruns and logs `cost_uncertain`, since the provider may have charged already.
-3. **Hand to a person.** A loop (the same call 3 times) stops as `STOPPED_LOOP`; a call that would pass a limit is skipped and the run stops as `STOPPED_BUDGET`. Both save progress first. A person also takes over after 3 resumes, when every model is down, when a retry fails again, on a third sandbox denial, or before a missed deadline.
+3. **Hand to a person.** A loop (the same call 3 times) stops as `STOPPED_LOOP`; a call that would pass a limit is skipped and the run stops as `STOPPED_BUDGET`. Both save progress first. A person also takes over on the third lease expiry (after two resumes), when every model is down, when a retry fails again, on a third sandbox denial, or before a missed deadline.
 
 
 
