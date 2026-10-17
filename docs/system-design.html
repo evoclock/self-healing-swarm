@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="generator" content="archify 3.1.0">
   <meta name="archify-reader-contract" content="declared-wide-v1">
-  <title>Multi-tenant background agent runtime Diagram</title>
+  <title>Multi-tenant background agents: target design Diagram</title>
   <script>
     // Resolve the theme before first paint so light-preference users don't
     // see a dark flash. The toolbar script below re-applies with UI state.
@@ -5040,6 +5040,18 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       svg [data-node-id], svg [data-edge-from], svg [data-detail], svg [data-detail-anchor], svg [data-legend-hit], svg { transition: none !important; }
     }
   </style>
+<style id="target-design-status">
+g[data-node-tag^="DESIGNED"] rect[data-animate="node"]{stroke:#8a94a6 !important;stroke-dasharray:6 4;fill:rgba(138,148,166,.08) !important;}
+g[data-node-tag^="DESIGNED"] text{fill:#9aa3b2 !important;}
+g[data-node-tag^="DESIGNED"] .semantic-sigil{opacity:.5}
+.status-badge-partial{fill:none;stroke:#e0a83a;stroke-dasharray:3 2;stroke-width:1}
+.status-legend{display:flex;gap:22px;flex-wrap:wrap;align-items:center;margin:6px 0 10px;font:12px/1.4 "JetBrains Mono",ui-monospace,monospace;color:var(--text-secondary,#b8c0cc)}
+.status-legend span.sw{display:inline-block;width:26px;height:14px;border-radius:3px;vertical-align:middle;margin-right:6px}
+.status-legend .sw.built{border:1.5px solid #4fb3d9}
+.status-legend .sw.partial{border:1.5px solid #4fb3d9;position:relative}
+.status-legend .sw.partial::after{content:"";position:absolute;left:5px;top:3px;width:12px;height:4px;border:1px dashed #e0a83a}
+.status-legend .sw.designed{border:1.5px dashed #8a94a6;background:rgba(138,148,166,.08)}
+</style>
 </head>
 <body>
   <!-- Toolbar: theme, live visual style, trace motion, presentation stage, and export.
@@ -5150,17 +5162,23 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
            data-preset-badge-blueprint="BLUEPRINT / REV 01"
            data-preset-badge-editorial="EDITORIAL / FIELD NOTE">
         <div class="pulse-dot"></div>
-        <h1>Multi-tenant background agent runtime</h1>
+        <h1>Multi-tenant background agents: target design</h1>
       </div>
     </div>
 
-    <script id="archify-source-evidence-data" type="application/json">{"schemaVersion":1,"verified":true,"repository":{"url":"git@github.com:evoclock/self-healing-swarm","revision":"ac62c18a55dddda3af222eff2633597fd309aecc","shortRevision":"ac62c18","label":"evoclock/self-healing-swarm","linkMode":"local-only"},"referenceCount":25,"nodes":{"config":[{"path":"runtime/config.py","line":34,"endLine":90,"label":"limits from the yaml"}],"person":[{"path":"runtime/scheduler.py","line":114,"endLine":117,"label":"missed deadlines escalate"}],"approver":[{"path":"migrations/0004_memberships.sql","line":2,"endLine":5,"label":"approver rows"}],"scheduler":[{"path":"runtime/scheduler.py","line":72,"endLine":117,"label":"deadline first"},{"path":"runtime/scheduler.py","line":37,"endLine":41,"label":"third lease expiry escalates"}],"drill":[{"path":"Makefile","line":17,"endLine":22,"label":"replay, no key"},{"path":"drill/__main__.py","line":48,"endLine":67,"label":"eighteen scenarios"}],"container":[{"path":"runtime/docker_api.py","line":32,"endLine":70,"label":"locked HostConfig"},{"path":"drill/__main__.py","line":89,"endLine":127,"label":"kill then resume"}],"proxy":[{"path":"proxy/gate.py","line":104,"endLine":110,"label":"reserve, then call"},{"path":"proxy/gate.py","line":133,"endLine":134,"label":"py.exec is refused"},{"path":"proxy/service.py","line":113,"endLine":116,"label":"quota 429, informational Retry-After"},{"path":"proxy/service.py","line":129,"endLine":133,"label":"forwards upstream Retry-After"},{"path":"proxy/service.py","line":306,"endLine":309,"label":"seconds to next minute"}],"cloud":[{"path":"proxy/providers.py","line":110,"endLine":132,"label":"trace headers"},{"path":"proxy/providers.py","line":67,"endLine":92,"label":"upstream 429 code and Retry-After"},{"path":"proxy/providers.py","line":300,"endLine":309,"label":"SDK retries off"}],"local":[{"path":"agent/loop.py","line":26,"endLine":35,"label":"429 or three errors"},{"path":"agent/loop.py","line":51,"endLine":58,"label":"429 wait: backoff vs Retry-After"},{"path":"agent/loop.py","line":61,"endLine":66,"label":"daily limit: local or escalate"}],"mail":[{"path":"proxy/gate.py","line":292,"endLine":310,"label":"list this tenant"}],"postgres":[{"path":"migrations/0001_init.sql","line":157,"endLine":172,"label":"force row security"}],"recorded":[{"path":"Makefile","line":20,"endLine":21,"label":"PROXY_MODE replay"}],"send":[{"path":"outbox/send.py","line":91,"endLine":116,"label":"SMTP, then dedup"}],"evals":[{"path":"evals/gate.py","line":92,"endLine":97,"label":"drop above 0.3 fails"}]}}</script>
+    <script id="archify-source-evidence-data" type="application/json">{"schemaVersion":1,"verified":true,"repository":{"url":"git@github.com:evoclock/self-healing-swarm","revision":"3a8840b11b47d0c8c1e78511b316c065756840f3","shortRevision":"3a8840b","label":"evoclock/self-healing-swarm","linkMode":"local-only"},"referenceCount":30,"nodes":{"config":[{"path":"runtime/config.py","line":34,"endLine":90,"label":"limits from the yaml"}],"scheduler":[{"path":"runtime/scheduler.py","line":72,"endLine":117,"label":"deadline first"},{"path":"runtime/dispatch.py","line":21,"endLine":28,"label":"provider tokens split per tenant"}],"container":[{"path":"runtime/docker_api.py","line":32,"endLine":70,"label":"locked HostConfig"},{"path":"drill/__main__.py","line":89,"endLine":127,"label":"kill then resume"},{"path":"proxy/gate.py","line":133,"endLine":134,"label":"py.exec is refused"}],"proxy":[{"path":"proxy/gate.py","line":104,"endLine":110,"label":"reserve, then call"},{"path":"proxy/service.py","line":113,"endLine":116,"label":"quota 429, informational Retry-After"},{"path":"proxy/service.py","line":129,"endLine":133,"label":"forwards upstream Retry-After"},{"path":"proxy/service.py","line":306,"endLine":309,"label":"seconds to next minute"}],"cloud":[{"path":"proxy/providers.py","line":110,"endLine":132,"label":"trace headers"},{"path":"proxy/providers.py","line":67,"endLine":92,"label":"upstream 429 code and Retry-After"},{"path":"proxy/providers.py","line":300,"endLine":309,"label":"SDK retries off"}],"local":[{"path":"agent/loop.py","line":26,"endLine":35,"label":"429 or three errors"},{"path":"agent/loop.py","line":51,"endLine":58,"label":"429 wait: backoff vs Retry-After"},{"path":"agent/loop.py","line":61,"endLine":66,"label":"daily limit: local or escalate"}],"person":[{"path":"runtime/scheduler.py","line":114,"endLine":117,"label":"missed deadlines escalate"}],"watcher":[{"path":"runtime/watcher.py","line":51,"endLine":65,"label":"expired leases"},{"path":"runtime/scheduler.py","line":37,"endLine":41,"label":"third lease expiry escalates"}],"mail":[{"path":"proxy/gate.py","line":292,"endLine":310,"label":"list this tenant"}],"postgres":[{"path":"migrations/0001_init.sql","line":157,"endLine":172,"label":"force row security"}],"approver":[{"path":"migrations/0004_memberships.sql","line":2,"endLine":5,"label":"approver rows"}],"send":[{"path":"outbox/send.py","line":91,"endLine":116,"label":"SMTP, then dedup"}],"evals":[{"path":"evals/gate.py","line":92,"endLine":97,"label":"drop above 0.3 fails"}],"memory":[{"path":"runtime/memory.py","line":19,"endLine":58,"label":"memory_write"},{"path":"proxy/gate.py","line":242,"endLine":245,"label":"cursor and summary on state"},{"path":"proxy/gate.py","line":338,"endLine":346,"label":"facts and summaries loaded"}],"recorded":[{"path":"Makefile","line":20,"endLine":21,"label":"PROXY_MODE replay"}],"drill":[{"path":"Makefile","line":17,"endLine":22,"label":"replay, no key"},{"path":"drill/__main__.py","line":48,"endLine":67,"label":"eighteen scenarios"}]}}</script>
     <script id="archify-i18n-data" type="application/json">{"locale":"en","messages":{"viewer.kind.frontend":"Frontend","viewer.kind.backend":"Backend","viewer.kind.database":"Database","viewer.kind.cloud":"Cloud","viewer.kind.security":"Security","viewer.kind.messagebus":"Message bus","viewer.kind.external":"External","viewer.kind.neutral":"Neutral","viewer.kind.node":"Node","viewer.kind.start":"Start","viewer.kind.active":"Active","viewer.kind.waiting":"Waiting","viewer.kind.decision":"Decision","viewer.kind.success":"Success","viewer.kind.failure":"Failure","viewer.toolbar.actions":"Diagram actions","viewer.theme.toggle.title":"Toggle theme (T)","viewer.theme.toggle":"Toggle color theme","viewer.theme.dark":"Dark","viewer.theme.light":"Light","viewer.preset.choose.title":"Choose visual style (S cycles)","viewer.preset.choose":"Choose visual style","viewer.preset.style":"Style","viewer.preset.menu":"Visual style","viewer.preset.identity":"Visual identity","viewer.preset.cycles":"to cycle","viewer.preset.classic":"Classic","viewer.preset.classic.short":"Classic","viewer.preset.classic.hint":"Stable technical default","viewer.preset.flow":"Signal Flow","viewer.preset.flow.short":"Flow","viewer.preset.flow.hint":"Motion-forward presentation","viewer.preset.blueprint":"Blueprint","viewer.preset.blueprint.hint":"Engineering review","viewer.preset.editorial":"Editorial","viewer.preset.editorial.hint":"Publication and launch notes","viewer.preset.badge.signalFlow":"SIGNAL FLOW","viewer.preset.badge.blueprint":"BLUEPRINT / REV 01","viewer.preset.badge.editorial":"EDITORIAL / FIELD NOTE","viewer.preset.badge.editorialPlate":"ARCHIFY / PLATE 04","viewer.preset.current":"Visual style: {style}. Choose visual style","viewer.motion.live":"Live","viewer.motion.still":"Still","viewer.motion.pause":"Pause motion","viewer.motion.resume":"Resume motion","viewer.motion.reduced":"Motion paused by reduced-motion preference","viewer.motion.hidden":"Motion paused while this page is hidden","viewer.motion.yielding":"Pause motion; currently yielding to {owner}","viewer.motion.yielding.title":"Live preview enabled · yielding to {owner}","viewer.owner.route":"Route Probe","viewer.owner.lens":"Semantic Lens","viewer.owner.relationship":"Relationship Preview","viewer.owner.intent":"Intent Trace","viewer.owner.focus":"semantic focus","viewer.owner.legend":"legend preview","viewer.owner.reader":"reader interaction","viewer.present.enter":"Enter presentation stage","viewer.present.enter.title":"Presentation stage (F)","viewer.present.exit":"Exit presentation stage","viewer.present.exit.title":"Exit presentation stage (F or Escape)","viewer.present.present":"Present","viewer.present.exit.label":"Exit","viewer.export.button":"Export","viewer.export.button.title":"Export diagram (E)","viewer.export.diagram":"Export diagram","viewer.export.menu":"Export","viewer.export.subtitle":"Portable, clean outputs","viewer.export.share":"Share","viewer.export.shareCard":"Share Card","viewer.export.routeShareCard":"Route Share Card","viewer.export.reachShareCard":"Reach Share Card","viewer.export.copyDiagram":"Copy diagram","viewer.export.clipboardPng":"PNG to clipboard","viewer.export.raster":"Raster images","viewer.export.image":"Image","viewer.export.lossless":"Lossless image","viewer.export.compact":"Compact image","viewer.export.modern":"Modern image","viewer.export.vectorMotion":"Vector and motion","viewer.export.vectorMotion.heading":"Vector \u0026 motion","viewer.export.editable":"Editable vector","viewer.export.svg.auto":"SVG · Auto","viewer.export.svg.auto.hint":"Matches host theme","viewer.export.svg.light":"SVG · Light","viewer.export.svg.light.hint":"Always light","viewer.export.svg.dark":"SVG · Dark","viewer.export.svg.dark.hint":"Always dark","viewer.export.motion6s":"6s motion","viewer.export.unsupported":"Not supported by this browser","viewer.export.clipboardUnsupported":"Clipboard image write not supported by this browser","viewer.export.clipboardUnsupported.short":"Clipboard image write not supported in this browser.","viewer.export.motionUnavailable":"Motion capture unavailable in this browser","viewer.export.webmUnavailable":"WebM unavailable in this browser","viewer.export.failed":"Export failed: {message}","viewer.export.unknownVariant":"Unknown Share Card variant: {variant}","viewer.export.routeRequired":"Trace a route before exporting a Route Share Card","viewer.export.reachRequired":"Trace authored reach before exporting a Reach Share Card","viewer.export.unknown":"unknown","viewer.export.routeFailed":"Route Share Card export failed: {message}","viewer.export.reachFailed":"Reach Share Card export failed: {message}","viewer.export.copyFailed":"Copy failed: {message}","viewer.export.copiedPng":"Copied PNG to clipboard","viewer.export.downloadedRoute":"Downloaded Route Share Card","viewer.export.downloadedReach":"Downloaded Reach Share Card","viewer.export.downloadedWebm":"Downloaded WebM","viewer.export.recording":"Recording 6 seconds of motion…","viewer.export.card.routeSummary.one":"Path: {source} → {target} · {count} step","viewer.export.card.routeSummary.other":"Path: {source} → {target} · {count} steps","viewer.export.card.reachSummary":"Authored {direction} from {origin} · {nodes} · {links} · max {hops}","viewer.export.card.node.one":"{count} node","viewer.export.card.node.other":"{count} nodes","viewer.export.card.link.one":"{count} link","viewer.export.card.link.other":"{count} links","viewer.export.card.hop.one":"{count} hop","viewer.export.card.hop.other":"{count} hops","viewer.export.card.routeBadge":"ARCHIFY · ROUTE · {hops}","viewer.export.card.reachBadge":"ARCHIFY · {direction} REACH","viewer.export.direction.upstream":"Upstream","viewer.export.direction.downstream":"Downstream","viewer.export.error.canvasUnavailable":"Canvas unavailable for {label}","viewer.export.error.contextUnavailable":"2D canvas context unavailable for {label}","viewer.export.error.toBlobUnavailable":"canvas.toBlob unavailable for {label}","viewer.export.error.toBlobNull":"canvas.toBlob returned no data for {label}","viewer.export.error.variantsCombined":"Share Card variants cannot be combined","viewer.export.error.viewerState":"Share Card export could not remove temporary viewer state","viewer.export.error.routeState":"Route Card export could not preserve the resolved route safely","viewer.export.error.reachState":"Reach Card export could not preserve authored reach safely","viewer.export.error.webmRequirements":"WebM motion export requires a trace animation and browser MediaRecorder support","viewer.export.error.mediaRecorder":"MediaRecorder failed","viewer.export.error.emptyWebm":"MediaRecorder produced an empty WebM","viewer.export.error.webmBackground":"SVG background could not be loaded for WebM export","viewer.guide.title":"Explore this system","viewer.focus.selectedNodes":"{count} selected nodes","viewer.guide.eyebrow":"Diagram guide","viewer.guide.close":"Close diagram guide","viewer.guide.inspecting":"Inspecting compiled semantics","viewer.guide.actions":"Diagram exploration actions","viewer.guide.find":"Find any node","viewer.guide.find.hint":"Search labels, responsibilities, kinds, and stable IDs.","viewer.guide.route":"Trace a route","viewer.guide.route.aria":"Trace a directed route","viewer.guide.route.hint":"Ask how two semantic nodes connect in authored direction.","viewer.guide.map":"See the whole system","viewer.guide.map.hint":"Open Semantic Radar with a live viewport and stable nodes.","viewer.guide.lens":"Compare semantic kinds","viewer.guide.lens.hint":"Count roles, reveal their traffic, and compare direct authored links.","viewer.guide.present":"Enter Presentation Stage","viewer.guide.present.hint":"Give the live diagram the viewport without changing export.","viewer.guide.shortcuts":"Additional keyboard shortcuts","viewer.guide.shortcut.export":"Export","viewer.guide.shortcut.theme":"Theme","viewer.guide.shortcut.style":"Style","viewer.guide.shortcut.reset":"Reset","viewer.guide.shortcut.zoomIn":"Zoom in","viewer.guide.shortcut.zoomOut":"Zoom out","viewer.guide.shortcut.close":"Close","viewer.guide.credit":"Find Archify useful? A star on GitHub helps","viewer.guide.star":"Star","viewer.guide.facts":"{nodes} · {relationships}","viewer.guide.fact.node.one":"{count} semantic node","viewer.guide.fact.node.other":"{count} semantic nodes","viewer.guide.fact.relationship.one":"{count} relationship","viewer.guide.fact.relationship.other":"{count} relationships","viewer.guide.open":"Open diagram guide","viewer.finder.title":"Find a node","viewer.finder.close":"Close node finder","viewer.finder.placeholder":"Search labels or IDs","viewer.finder.search":"Search diagram nodes","viewer.finder.results":"Diagram nodes","viewer.finder.empty":"No matching nodes","viewer.finder.result.focus":"Focus {label}","viewer.finder.result.routeStart":"Choose {label} as route start","viewer.finder.result.routeTarget":"Choose {label} as route destination, {links}","viewer.finder.status.empty":"No matching nodes","viewer.finder.status.count.one":"{count} matching node","viewer.finder.status.count.other":"{count} matching nodes","viewer.finder.noun.nodes":"nodes","viewer.finder.link.one":"{count} link","viewer.finder.link.other":"{count} links","viewer.finder.result.focus.one":"Focus {label}, {count} related connection","viewer.finder.result.focus.other":"Focus {label}, {count} related connections","viewer.finder.status.filtered":"{visible} of {available} {noun}","viewer.finder.status.all":"{available} {noun}","viewer.passport.eyebrow":"Semantic passport","viewer.passport.metadata":"Node metadata","viewer.passport.evidence":"Verified source evidence","viewer.passport.verified":"Verified source","viewer.passport.verificationScope":"Verified against local Git at the pinned revision. Remote access has not been checked.","viewer.passport.reach":"Authored reach","viewer.passport.reach.trace":"Trace authored reachability","viewer.passport.upstream":"Upstream","viewer.passport.downstream":"Downstream","viewer.passport.upstream.trace":"Trace upstream authored reachability","viewer.passport.downstream.trace":"Trace downstream authored reachability","viewer.passport.close":"Close semantic passport","viewer.passport.move":"Move semantic passport. Drag, use arrow keys, or press Home to reset.","viewer.passport.copy":"Copy link","viewer.passport.copy.focus":"Copy link to focused node","viewer.passport.relations":"Relations","viewer.passport.relations.show":"Show connected relationships","viewer.passport.relations.hide":"Hide connected relationships","viewer.passport.relations.list":"Connected relationships","viewer.passport.copyRelation":"Copy relation","viewer.passport.copyNode":"Copy node","viewer.passport.copyPinned":"Copy link to pinned relationship","viewer.passport.copySource":"Copy link to source node","viewer.passport.copy.focused.success":"Focused node link copied","viewer.passport.copy.pinned.success":"Pinned relationship link copied","viewer.passport.copy.focused.failed":"Could not copy focused node link","viewer.passport.copy.pinned.failed":"Could not copy pinned relationship link","viewer.passport.relationship.none":"No connected relationships","viewer.passport.relationship.count.one":"{count} relation","viewer.passport.relationship.count.other":"{count} relations","viewer.passport.relationship.show.one":"Show {count} connected relationship","viewer.passport.relationship.show.other":"Show {count} connected relationships","viewer.passport.relationship.summary":"{out} outgoing · {in} incoming{loops}","viewer.passport.relationship.loops":" · {count} loop","viewer.passport.relationship.explorer":"Direct relationship explorer","viewer.passport.relationship.help":"Use arrow keys to explore relationships. Press Enter or Space to pin details; Escape clears.","viewer.passport.relationship.loopsBack":"loops back","viewer.passport.relationship.connectsTo":"connects to","viewer.passport.relationship.connectsFrom":"connects from","viewer.passport.relationship.pinned":"Pinned relationship · {from} → {to} · {label}","viewer.passport.relationship.inspect":"Inspect relationship {index} of {total}: {from} to {to}, {label}. Press Enter for details.","viewer.passport.relationship.group.out":"Outgoing","viewer.passport.relationship.group.in":"Incoming","viewer.passport.relationship.group.loop":"Self loops","viewer.passport.relationship.row":"{group}: {relationship}, {neighbor}","viewer.passport.relationship.direction.out":"OUT →","viewer.passport.relationship.direction.in":"← IN","viewer.passport.relationship.direction.loop":"LOOP","viewer.passport.sourceCount.one":"{count} verified source reference","viewer.passport.sourceCount.other":"{count} verified source references","viewer.passport.repository.open":"Open verified repository revision {revision}","viewer.passport.source.open":"Open verified source {path} at revision {revision}","viewer.passport.source.openLink":"Open ↗","viewer.passport.reach.upstream.one":"Trace {count} upstream authored node","viewer.passport.reach.upstream.other":"Trace {count} upstream authored nodes","viewer.passport.reach.downstream.one":"Trace {count} downstream authored node","viewer.passport.reach.downstream.other":"Trace {count} downstream authored nodes","viewer.passport.reach.noUpstream":"No upstream authored nodes","viewer.passport.reach.noDownstream":"No downstream authored nodes","viewer.passport.reach.status":"{direction} · {nodes} nodes · {links} links · max {hops} hops","viewer.route.eyebrow":"Path","viewer.route.start":"Click where the path starts","viewer.route.start.find":"Find start","viewer.route.start.find.aria":"Find a route start","viewer.route.copy":"Copy link","viewer.route.copy.aria":"Copy link to traced route","viewer.route.clear":"Clear","viewer.route.clear.aria":"Clear route probe","viewer.route.traced":"Path","viewer.route.pickTwo":"Click two nodes on the diagram","viewer.route.pickOne":"Click a node on the diagram","viewer.route.controls":"Route journey controls","viewer.route.previous":"Previous route position","viewer.route.play":"Play route journey","viewer.route.pause":"Pause route journey","viewer.route.replay":"Replay route journey","viewer.route.next":"Next route position","viewer.route.journey":"Journey","viewer.route.pause.label":"Pause","viewer.route.replay.label":"Replay","viewer.route.overview":"Overview","viewer.route.overview.aria":"Show complete route overview","viewer.route.instructions":"Click a start, then an end. Paths follow the arrows.","viewer.route.destination":"Where does the path from {label} end?","viewer.route.destination.find":"Find target","viewer.route.destination.find.aria":"Find a reachable route destination","viewer.route.differentDestination":"Choose a different destination","viewer.route.distinct":"Pick two different nodes.","viewer.route.unreachable":"Cannot reach {label} from here","viewer.route.unreachable.detail":"{target} cannot be reached from {source} along the arrows. Pick a highlighted node.","viewer.route.start.instructions":"Next, pick the end. Only nodes you can reach will light up.","viewer.route.copy.success":"Traced route link copied","viewer.route.copy.failed":"Could not copy traced route link","viewer.route.position":"Route position {index} of {total}: {label}","viewer.route.step":"Step {index} of {total} · {phase} · {label}","viewer.route.motionRequired":"Automatic journey requires Live motion","viewer.route.trigger.clear":"Clear traced route","viewer.route.overview.status":"{nodes} · {hops} · shortest path","viewer.route.overview.node.one":"{count} node","viewer.route.overview.node.other":"{count} nodes","viewer.route.overview.hop.one":"{count} step","viewer.route.overview.hop.other":"{count} steps","viewer.route.phase.playing":"Playing","viewer.route.phase.complete":"Complete","viewer.route.phase.inspecting":"Inspecting","viewer.route.destination.count.one":"{count} reachable node is highlighted. Click it.","viewer.route.destination.count.other":"{count} reachable nodes are highlighted. Click one.","viewer.route.noOutgoing":"No arrows lead out of this node. Clear it and pick another start.","viewer.route.result.title":"{source} to {target}","viewer.route.finder.source.title":"Choose route start","viewer.route.finder.source.placeholder":"Search route sources","viewer.route.finder.source.empty":"No matching route sources","viewer.route.finder.source.results":"Nodes that can start a route","viewer.route.finder.source.noun":"route sources","viewer.route.finder.source.badge":"start","viewer.route.finder.target.title":"Destination from {label}","viewer.route.finder.target.placeholder":"Search reachable destinations","viewer.route.finder.target.empty":"No matching reachable destinations","viewer.route.finder.target.results":"Reachable route destinations","viewer.route.finder.target.noun":"reachable destinations","viewer.route.hop.one":"{count} hop","viewer.route.hop.other":"{count} hops","viewer.lens.eyebrow":"Semantic lens","viewer.lens.title":"Compare system roles","viewer.lens.close":"Close semantic lens","viewer.lens.instruction":"Choose up to two semantic kinds. One reveals its real traffic; two compare only direct authored relationships.","viewer.lens.kinds":"Semantic kinds","viewer.lens.choose":"Choose a kind to inspect its nodes and touching relationships.","viewer.lens.copy":"Copy link to semantic lens","viewer.lens.clear":"Clear semantic lens","viewer.lens.open":"Open semantic lens","viewer.lens.openActive":"Open active semantic lens","viewer.lens.legend":"Semantic legend","viewer.lens.legend.inspect.one":"Inspect {label}, {count} node","viewer.lens.legend.inspect.other":"Inspect {label}, {count} nodes","viewer.lens.kind.count.one":"{label}, {count} node","viewer.lens.kind.count.other":"{label}, {count} nodes","viewer.lens.compare.one":"{first} → {second}: {forward} · {second} → {first}: {reverse} · {count} direct relationship","viewer.lens.compare.other":"{first} → {second}: {forward} · {second} → {first}: {reverse} · {count} direct relationships","viewer.lens.single":"{nodes} · {relationships} · connected peers remain visible","viewer.lens.node.one":"{count} {label} node","viewer.lens.node.other":"{count} {label} nodes","viewer.lens.relationship.one":"{count} touching relationship","viewer.lens.relationship.other":"{count} touching relationships","viewer.radar.title":"Semantic radar","viewer.radar.building":"Building overview","viewer.radar.openFull":"Open full semantic radar","viewer.radar.open":"Open radar","viewer.radar.close":"Close semantic radar","viewer.radar.surface":"Diagram overview. Click a node to focus it, or use arrow keys to pan.","viewer.radar.click":"Click node","viewer.radar.drag":"Drag to pan","viewer.radar.space":"Semantic radar needs more MAP space.","viewer.radar.nodes":"Semantic diagram radar nodes","viewer.radar.focus":"Focus {label} from Semantic Radar","viewer.radar.status":"{count} nodes · {viewport}","viewer.radar.fullMap":"{count} nodes · full map","viewer.radar.compacted":"Radar compacted to avoid covering the Semantic Passport or MAP controls.","viewer.radar.cancelWaiting":"Cancel semantic radar waiting for more MAP space","viewer.radar.needsSpace":"Semantic radar needs more visible MAP space","viewer.radar.viewport.full":"full map","viewer.radar.viewport.width":"{percent}% width","viewer.radar.viewport.scale":"{percent}% viewport","viewer.nav.controls":"Diagram view controls","viewer.nav.route":"Trace a directed route","viewer.nav.route.title":"Trace route (R)","viewer.nav.route.short":"ROUTE","viewer.nav.radar":"Open semantic radar","viewer.nav.radar.title":"Semantic radar (M)","viewer.nav.radar.short":"MAP","viewer.nav.lens":"Open semantic lens","viewer.nav.lens.title":"Semantic lens (L)","viewer.nav.lens.short":"LENS","viewer.nav.find":"Find a node","viewer.nav.find.title":"Find a node (/)","viewer.outline.title":"Node index","viewer.rail.show":"Notes \u0026 index","viewer.rail.controls":"Side panel","viewer.rail.collapse":"Collapse side panel","viewer.rail.bottom":"Move panel below the diagram","viewer.rail.right":"Move panel beside the diagram","viewer.nav.guide":"Open diagram guide","viewer.nav.guide.title":"Diagram guide (?)","viewer.nav.zoomOut":"Zoom out","viewer.nav.zoomOut.title":"Zoom out (-)","viewer.nav.reset":"Reset diagram view","viewer.nav.reset.title":"Reset view (0)","viewer.nav.read":"READ","viewer.nav.zoomIn":"Zoom in","viewer.nav.zoomIn.title":"Zoom in (+)","viewer.nav.camera":"{hint}. Reset diagram view","viewer.nav.camera.title":"{semantic}{hint} · reset view (0)","viewer.nav.camera.semantic":"Semantic camera active · ","viewer.nav.level.map":"MAP","viewer.nav.level.read":"READ","viewer.nav.level.full":"FULL","viewer.nav.level.auto":"AUTO","viewer.nav.detail.map":"Zoom in to reveal relationship labels and node context","viewer.nav.detail.read":"Zoom in again to reveal tags and annotations","viewer.nav.detail.full":"Full diagram detail","viewer.intent.summary":"{label}. {out} outgoing, {in} incoming{loops}. {total} connections. Press Enter for details.","viewer.intent.loops":", {count} self loop","viewer.common.copied":"Copied","viewer.common.copyFailed":"Copy failed","viewer.common.copyLink":"Copy link","viewer.common.clear":"Clear","viewer.common.close":"Close"}}</script>
+<div class="status-legend" role="note" aria-label="Legend">
+  <strong>Target design.</strong>
+  <span><span class="sw built"></span>Built: solid, with source references</span>
+  <span><span class="sw partial"></span>Partly built: solid with a dashed badge</span>
+  <span><span class="sw designed"></span>Designed, not built: dashed and muted, points to its design.md section</span>
+</div>
     <!-- Main Diagram -->
     <div class="diagram-container" data-detail-level="read"
          data-preset-badge-editorial-plate="ARCHIFY / PLATE 04">
-      <svg viewBox="0 0 1270 620" role="img" lang="en" aria-labelledby="archify-diagram-title archify-diagram-description" data-animation="trace" data-preset="classic" data-quality-profile="showcase" data-node-ui="" data-reader-fit="intrinsic-height" data-reader-min-text="7.5" data-reader-primary-text="14">
-        <title id="archify-diagram-title">Multi-tenant background agent runtime</title>
+      <svg viewBox="0 0 1620 830" role="img" lang="en" aria-labelledby="archify-diagram-title archify-diagram-description" data-animation="trace" data-preset="classic" data-quality-profile="showcase" data-node-ui="" data-reader-fit="intrinsic-height" data-reader-min-text="7.5" data-reader-primary-text="14">
+        <title id="archify-diagram-title">Multi-tenant background agents: target design</title>
         <desc id="archify-diagram-description">An architecture diagram generated by Archify.</desc>
         <!-- Definitions -->
         <defs>
@@ -5206,309 +5224,446 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <rect width="100%" height="100%" fill="url(#grid)" />
 
         <!-- Boundaries (behind everything) -->
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="0" data-composition-frame-label="Single host, Docker" x="200" y="118" width="880" height="434" rx="12" class="c-region" stroke-width="1"/>
-
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="security-group" data-composition-frame-id="1" data-composition-frame-label="Internal network, proxies only" x="620" y="118" width="216" height="138" rx="8" class="c-security-group" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="0" data-composition-frame-label="Single host, Docker" x="260" y="140" width="790" height="442" rx="12" class="c-region" stroke-width="1"/>
 
         <!-- Connection paths (before components for correct z-order) -->
         <g data-graph-role="automatic-crossover" style="--step:0">
-          <path data-graph-role="automatic-crossover-underlay" d="M 176 200 L 230 200" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="config" data-edge-to="scheduler" data-edge-label="yaml" data-edge-key="0" data-edge-id="yaml" data-composition-points="176,200;230,200" data-composition-crossover="halo" data-composition-independent="true" d="M 176 200 L 230 200" class="a-default" data-animate="edge" style="--step:0" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 200 199 L 290 199" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="config" data-edge-to="scheduler" data-edge-label="yaml" data-edge-key="0" data-edge-id="c1" data-composition-points="200,199;290,199" data-composition-crossover="halo" data-composition-independent="true" d="M 200 199 L 290 199" class="a-default" data-animate="edge" style="--step:0" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:1">
-          <path data-graph-role="automatic-crossover-underlay" d="M 305 168 L 305 84" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="scheduler" data-edge-to="person" data-edge-label="escalate" data-edge-key="1" data-edge-id="escalate" data-composition-points="305,168;305,84" data-composition-crossover="halo" data-composition-independent="true" d="M 305 168 L 305 84" class="a-security" data-animate="edge" style="--step:1" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 460 197.95 L 560 197.95" fill="none" stroke="var(--mask)" stroke-width="5.8" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="scheduler" data-edge-to="container" data-edge-label="start" data-edge-key="1" data-edge-id="c2" data-composition-points="460,197.95;560,197.95" data-composition-crossover="halo" data-composition-independent="true" d="M 460 197.95 L 560 197.95" class="a-emphasis" data-animate="edge" style="--step:1" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:2">
-          <path data-graph-role="automatic-crossover-underlay" d="M 540 196 L 650 196" fill="none" stroke="var(--mask)" stroke-width="5.8" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="drill" data-edge-to="container" data-edge-label="kill, escape" data-edge-key="2" data-edge-id="locked" data-composition-points="540,196;650,196" data-composition-crossover="halo" data-composition-independent="true" d="M 540 196 L 650 196" class="a-emphasis" data-animate="edge" style="--step:2" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 290 213 L 253 213 Q 245 213 245 221 L 245 358 Q 245 366 237 366 L 200 366" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="scheduler" data-edge-to="person" data-edge-label="escalate" data-edge-key="2" data-edge-id="c3" data-composition-points="290,213;245,213;245,366;200,366" data-composition-crossover="halo" data-composition-independent="true" d="M 290 213 L 253 213 Q 245 213 245 221 L 245 358 Q 245 366 237 366 L 200 366" class="a-security" data-animate="edge" style="--step:2" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:3">
-          <path data-graph-role="automatic-crossover-underlay" d="M 806 183.95 L 890 183.95" fill="none" stroke="var(--mask)" stroke-width="5.8" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="container" data-edge-to="proxy" data-edge-label="run token" data-edge-key="3" data-edge-id="token" data-composition-points="806,183.95;890,183.95" data-composition-crossover="halo" data-composition-independent="true" d="M 806 183.95 L 890 183.95" class="a-emphasis" data-animate="edge" style="--step:3" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 460 366 L 502 366 Q 510 366 510 358 L 510 221 Q 510 213 518 213 L 560 213" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="watcher" data-edge-to="container" data-edge-label="resume" data-edge-key="3" data-edge-id="c4" data-composition-points="460,366;510,366;510,213;560,213" data-composition-crossover="halo" data-composition-independent="true" d="M 460 366 L 502 366 Q 510 366 510 358 L 510 221 Q 510 213 518 213 L 560 213" class="a-default" data-animate="edge" style="--step:3" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:4">
-          <path data-graph-role="automatic-crossover-underlay" d="M 1050 185 L 1078 185 Q 1086 185 1086 177 L 1086 124 Q 1086 116 1094 116 L 1110 116" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="proxy" data-edge-to="cloud" data-edge-label="key" data-edge-key="4" data-edge-id="key" data-composition-points="1050,185;1086,185;1086,116;1110,116" data-composition-crossover="halo" data-composition-independent="true" d="M 1050 185 L 1078 185 Q 1086 185 1086 177 L 1086 124 Q 1086 116 1094 116 L 1110 116" class="a-security" data-animate="edge" style="--step:4" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 740 197.95 L 840 197.95" fill="none" stroke="var(--mask)" stroke-width="5.8" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="container" data-edge-to="proxy" data-edge-label="run token" data-edge-key="4" data-edge-id="c5" data-composition-points="740,197.95;840,197.95" data-composition-crossover="halo" data-composition-independent="true" d="M 740 197.95 L 840 197.95" class="a-emphasis" data-animate="edge" style="--step:4" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:5">
-          <path data-graph-role="automatic-crossover-underlay" d="M 1050 199 L 1078 199 Q 1086 199 1086 207 L 1086 208 Q 1086 216 1094 216 L 1110 216" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="proxy" data-edge-to="local" data-edge-label="local" data-edge-key="5" data-edge-id="fallback" data-composition-points="1050,199;1086,199;1086,216;1110,216" data-composition-crossover="halo" data-composition-independent="true" d="M 1050 199 L 1078 199 Q 1086 199 1086 207 L 1086 208 Q 1086 216 1094 216 L 1110 216" class="a-dashed" data-animate="edge" style="--step:5" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 1020 186 L 1118 186 Q 1126 186 1126 178 L 1126 112" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="proxy" data-edge-to="cloud" data-edge-label="real key" data-edge-key="5" data-edge-id="c6" data-composition-points="1020,186;1126,186;1126,112" data-composition-crossover="halo" data-composition-independent="true" d="M 1020 186 L 1118 186 Q 1126 186 1126 178 L 1126 112" class="a-security" data-animate="edge" style="--step:5" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:6">
-          <path data-graph-role="automatic-crossover-underlay" d="M 890 199 L 856 199 Q 848 199 848 207 L 848 352 Q 848 360 840 360 L 806 360" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="proxy" data-edge-to="mail" data-edge-label="tenant scope" data-edge-key="6" data-edge-id="scope" data-composition-points="890,199;848,199;848,360;806,360" data-composition-crossover="halo" data-composition-independent="true" d="M 890 199 L 856 199 Q 848 199 848 207 L 848 352 Q 848 360 840 360 L 806 360" class="a-security" data-animate="edge" style="--step:6" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 1004 242 L 1004 308 Q 1004 316 1012 316 L 1110 316" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="proxy" data-edge-to="local" data-edge-label="fallback" data-edge-key="6" data-edge-id="c7" data-composition-points="1004,242;1004,316;1110,316" data-composition-crossover="halo" data-composition-independent="true" d="M 1004 242 L 1004 308 Q 1004 316 1012 316 L 1110 316" class="a-dashed" data-animate="edge" style="--step:6" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:7">
-          <path data-graph-role="automatic-crossover-underlay" d="M 977 236 L 977 328" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="proxy" data-edge-to="postgres" data-edge-label="journal" data-edge-key="7" data-edge-id="journal" data-composition-points="977,236;977,328" data-composition-crossover="halo" data-composition-independent="true" d="M 977 236 L 977 328" class="a-default" data-animate="edge" style="--step:7" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 840 213 L 798 213 Q 790 213 790 221 L 790 358 Q 790 366 782 366 L 740 366" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="proxy" data-edge-to="mail" data-edge-label="tenant scope" data-edge-key="7" data-edge-id="c8" data-composition-points="840,213;790,213;790,366;740,366" data-composition-crossover="halo" data-composition-independent="true" d="M 840 213 L 798 213 Q 790 213 790 221 L 790 358 Q 790 366 782 366 L 740 366" class="a-security" data-animate="edge" style="--step:7" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:8">
-          <path data-graph-role="automatic-crossover-underlay" d="M 1050 213 L 1066 213 Q 1074 213 1074 221 L 1074 492 Q 1074 500 1066 500 L 806 500" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="proxy" data-edge-to="recorded" data-edge-label="replay" data-edge-key="8" data-edge-id="replay" data-composition-points="1050,213;1074,213;1074,500;806,500" data-composition-crossover="halo" data-composition-independent="true" d="M 1050 213 L 1066 213 Q 1074 213 1074 221 L 1074 492 Q 1074 500 1066 500 L 806 500" class="a-dashed" data-animate="edge" style="--step:8" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 930 242 L 930 330" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="proxy" data-edge-to="postgres" data-edge-label="journal" data-edge-key="8" data-edge-id="c9" data-composition-points="930,242;930,330" data-composition-crossover="halo" data-composition-independent="true" d="M 930 242 L 930 330" class="a-default" data-animate="edge" style="--step:8" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:9">
-          <path data-graph-role="automatic-crossover-underlay" d="M 176 500 L 230 500" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="approver" data-edge-to="send" data-edge-label="approves" data-edge-key="9" data-edge-id="approve" data-composition-points="176,500;230,500" data-composition-crossover="halo" data-composition-independent="true" d="M 176 500 L 230 500" class="a-security" data-animate="edge" style="--step:9" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 200 526 L 290 526" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="approver" data-edge-to="send" data-edge-label="approves" data-edge-key="9" data-edge-id="c10" data-composition-points="200,526;290,526" data-composition-crossover="halo" data-composition-independent="true" d="M 200 526 L 290 526" class="a-security" data-animate="edge" style="--step:9" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:10">
-          <path data-graph-role="automatic-crossover-underlay" d="M 305 468 L 305 424 Q 305 416 313 416 L 948 416 Q 956 416 956 408 L 956 392" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="send" data-edge-to="postgres" data-edge-label="message id" data-edge-key="10" data-edge-id="sent" data-composition-points="305,468;305,416;956,416;956,392" data-composition-crossover="halo" data-composition-independent="true" d="M 305 468 L 305 424 Q 305 416 313 416 L 948 416 Q 956 416 956 408 L 956 392" class="a-default" data-animate="edge" style="--step:10" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 460 526 L 549 526 Q 557 526 557 518 L 557 413 Q 557 405 565 405 L 808 405 Q 816 405 816 397 L 816 374 Q 816 366 824 366 L 840 366" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="send" data-edge-to="postgres" data-edge-label="outbox" data-edge-key="10" data-edge-id="c11" data-composition-points="460,526;557,526;557,405;816,405;816,366;840,366" data-composition-crossover="halo" data-composition-independent="true" d="M 460 526 L 549 526 Q 557 526 557 518 L 557 413 Q 557 405 565 405 L 808 405 Q 816 405 816 397 L 816 374 Q 816 366 824 366 L 840 366" class="a-default" data-animate="edge" style="--step:10" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:11">
-          <path data-graph-role="automatic-crossover-underlay" d="M 485 468 L 485 438 Q 485 430 493 430 L 962 430 Q 970 430 970 422 L 970 392" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="evals" data-edge-to="postgres" data-edge-label="eval row" data-edge-key="11" data-edge-id="evalrow" data-composition-points="485,468;485,430;970,430;970,392" data-composition-crossover="halo" data-composition-independent="true" d="M 485 468 L 485 438 Q 485 430 493 430 L 962 430 Q 970 430 970 422 L 970 392" class="a-default" data-animate="edge" style="--step:11" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 740 526 L 840 526" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="evals" data-edge-to="memory" data-edge-label="eval_record" data-edge-key="11" data-edge-id="c12" data-composition-points="740,526;840,526" data-composition-crossover="halo" data-composition-independent="true" d="M 740 526 L 840 526" class="a-dashed" data-animate="edge" style="--step:11" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:12">
+          <path data-graph-role="automatic-crossover-underlay" d="M 670 726 L 686 726 Q 694 726 694 718 L 694 674 Q 694 666 702 666 L 802 666 Q 810 666 810 674 L 810 690" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="panel" data-edge-to="parent" data-edge-label="answers, challenges" data-edge-key="12" data-edge-id="c13" data-composition-points="670,726;694,726;694,666;810,666;810,690" data-composition-crossover="halo" data-composition-independent="true" d="M 670 726 L 686 726 Q 694 726 694 718 L 694 674 Q 694 666 702 666 L 802 666 Q 810 666 810 674 L 810 690" class="a-dashed" data-animate="edge" style="--step:12" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:13">
+          <path data-graph-role="automatic-crossover-underlay" d="M 1360 526 L 1290 526" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="drill" data-edge-to="recorded" data-edge-label="replay" data-edge-key="13" data-edge-id="c14" data-composition-points="1360,526;1290,526" data-composition-crossover="halo" data-composition-independent="true" d="M 1360 526 L 1290 526" class="a-default" data-animate="edge" style="--step:12" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         </g>
 
         <!-- Components -->
-        <g id="node-config" data-node-id="config" data-node-label="Agent yaml" tabindex="0" role="button" aria-label="Focus Agent yaml, one tenant, Architecture component" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="one tenant" data-node-context="Architecture component">
-          <title>Agent yaml · one tenant · Architecture component</title>
-          <rect x="36" y="168" width="140" height="64" rx="8" class="c-mask"/>
-          <rect x="36" y="168" width="140" height="64" rx="8" class="c-frontend" data-animate="node" style="--step:0" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(42 174) scale(0.6875)">
+        <g id="node-config" data-node-id="config" data-node-label="Agent config" tabindex="0" role="button" aria-label="Focus Agent config, instructions, tools, limits, Architecture component" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="instructions, tools, limits" data-node-tag="BUILT" data-node-context="Architecture component">
+          <title>Agent config · instructions, tools, limits · Architecture component · BUILT</title>
+          <rect x="30" y="170" width="170" height="72" rx="8" class="c-mask"/>
+          <rect x="30" y="170" width="170" height="72" rx="8" class="c-frontend" data-animate="node" style="--step:0" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(36 176) scale(0.6875)">
             <rect x="2" y="3" width="12" height="10" rx="2"/>
             <path d="M2 6.5h12"/>
             <circle cx="4.1" cy="4.8" r=".7" class="sigil-fill"/>
             <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="106" y="198" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Agent yaml</text>
-        <text data-detail="context" x="106" y="214" class="t-muted" font-size="9" text-anchor="middle">one tenant</text>
+          <text data-node-label="" data-detail-anchor="" x="115" y="204" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Agent config</text>
+        <text data-detail="context" x="115" y="220" class="t-muted" font-size="9" text-anchor="middle">instructions, tools, limits</text>
+        <text data-detail="fine" x="115" y="234" class="t-frontend" font-size="7" text-anchor="middle">BUILT</text>
         </g>
 
-        <g id="node-person" data-node-id="person" data-node-label="Person" tabindex="0" role="button" aria-label="Focus Person, escalations, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="escalations" data-node-context="Architecture component">
-          <title>Person · escalations · Architecture component</title>
-          <rect x="230" y="28" width="150" height="56" rx="8" class="c-mask"/>
-          <rect x="230" y="28" width="150" height="56" rx="8" class="c-external" data-animate="node" style="--step:2" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(236 34) scale(0.6875)">
-            <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
-            <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
-          </g>
-          <text data-node-label="" data-detail-anchor="" x="305" y="54" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Person</text>
-        <text data-detail="context" x="305" y="70" class="t-muted" font-size="9" text-anchor="middle">escalations</text>
-        </g>
-
-        <g id="node-approver" data-node-id="approver" data-node-label="Approver" tabindex="0" role="button" aria-label="Focus Approver, same tenant, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="same tenant" data-node-context="Architecture component">
-          <title>Approver · same tenant · Architecture component</title>
-          <rect x="36" y="468" width="140" height="64" rx="8" class="c-mask"/>
-          <rect x="36" y="468" width="140" height="64" rx="8" class="c-external" data-animate="node" style="--step:9" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(42 474) scale(0.6875)">
-            <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
-            <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
-          </g>
-          <text data-node-label="" data-detail-anchor="" x="106" y="498" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Approver</text>
-        <text data-detail="context" x="106" y="514" class="t-muted" font-size="9" text-anchor="middle">same tenant</text>
-        </g>
-
-        <g id="node-scheduler" data-node-id="scheduler" data-node-label="schedule" tabindex="0" role="button" aria-label="Focus schedule, deadline first, caps, Single host, Docker" aria-pressed="false" data-node-kind="backend" data-node-sublabel="deadline first, caps" data-node-context="Single host, Docker">
-          <title>schedule · deadline first, caps · Single host, Docker</title>
-          <rect x="230" y="168" width="150" height="64" rx="8" class="c-mask"/>
-          <rect x="230" y="168" width="150" height="64" rx="8" class="c-backend" data-animate="node" style="--step:1" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(236 174) scale(0.6875)">
+        <g id="node-scheduler" data-node-id="scheduler" data-node-label="Scheduler" tabindex="0" role="button" aria-label="Focus Scheduler, deadline first, caps, Single host, Docker" aria-pressed="false" data-node-kind="backend" data-node-sublabel="deadline first, caps" data-node-tag="BUILT" data-node-context="Single host, Docker">
+          <title>Scheduler · deadline first, caps · Single host, Docker · BUILT</title>
+          <rect x="290" y="170" width="170" height="72" rx="8" class="c-mask"/>
+          <rect x="290" y="170" width="170" height="72" rx="8" class="c-backend" data-animate="node" style="--step:1" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(296 176) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="305" y="198" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">schedule</text>
-        <text data-detail="context" x="305" y="214" class="t-muted" font-size="9" text-anchor="middle">deadline first, caps</text>
+          <text data-node-label="" data-detail-anchor="" x="375" y="204" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Scheduler</text>
+        <text data-detail="context" x="375" y="220" class="t-muted" font-size="9" text-anchor="middle">deadline first, caps</text>
+        <text data-detail="fine" x="375" y="234" class="t-backend" font-size="7" text-anchor="middle">BUILT</text>
         </g>
 
-        <g id="node-drill" data-node-id="drill" data-node-label="make drill" tabindex="0" role="button" aria-label="Focus make drill, one command, Single host, Docker" aria-pressed="false" data-node-kind="backend" data-node-sublabel="one command" data-node-context="Single host, Docker">
-          <title>make drill · one command · Single host, Docker</title>
-          <rect x="410" y="158" width="130" height="76" rx="8" class="c-mask"/>
-          <rect x="410" y="158" width="130" height="76" rx="8" class="c-backend" data-animate="node" style="--step:2" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(416 164) scale(0.6875)">
-            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
-          </g>
-          <text data-node-label="" data-detail-anchor="" x="475" y="194" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">make drill</text>
-        <text data-detail="context" x="475" y="210" class="t-muted" font-size="9" text-anchor="middle">one command</text>
-        </g>
-
-        <g id="node-container" data-node-id="container" data-node-label="Run container" tabindex="0" role="button" aria-label="Focus Run container, fresh per run, Single host, Docker › Internal network, proxies only" aria-pressed="false" data-node-kind="security" data-node-sublabel="fresh per run" data-node-context="Single host, Docker › Internal network, proxies only">
-          <title>Run container · fresh per run · Single host, Docker › Internal network, proxies only</title>
-          <rect x="650" y="148" width="156" height="88" rx="8" class="c-mask"/>
-          <rect x="650" y="148" width="156" height="88" rx="8" class="c-security" data-animate="node" style="--step:3" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(656 154) scale(0.6875)">
+        <g id="node-container" data-node-id="container" data-node-label="Run container" tabindex="0" role="button" aria-label="Focus Run container, one per run, proxy only, Single host, Docker" aria-pressed="false" data-node-kind="security" data-node-sublabel="one per run, proxy only" data-node-tag="BUILT" data-node-context="Single host, Docker">
+          <title>Run container · one per run, proxy only · Single host, Docker · BUILT</title>
+          <rect x="560" y="170" width="180" height="72" rx="8" class="c-mask"/>
+          <rect x="560" y="170" width="180" height="72" rx="8" class="c-security" data-animate="node" style="--step:2" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(566 176) scale(0.6875)">
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="728" y="190" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Run container</text>
-        <text data-detail="context" x="728" y="206" class="t-muted" font-size="9" text-anchor="middle">fresh per run</text>
+          <text data-node-label="" data-detail-anchor="" x="650" y="204" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Run container</text>
+        <text data-detail="context" x="650" y="220" class="t-muted" font-size="9" text-anchor="middle">one per run, proxy only</text>
+        <text data-detail="fine" x="650" y="234" class="t-security" font-size="7" text-anchor="middle">BUILT</text>
         </g>
 
-        <g id="node-proxy" data-node-id="proxy" data-node-label="Egress proxy x2" tabindex="0" role="button" aria-label="Focus Egress proxy x2, key, budget, journal, Single host, Docker" aria-pressed="false" data-node-kind="security" data-node-sublabel="key, budget, journal" data-node-context="Single host, Docker">
-          <title>Egress proxy x2 · key, budget, journal · Single host, Docker</title>
-          <rect x="890" y="148" width="160" height="88" rx="8" class="c-mask"/>
-          <rect x="890" y="148" width="160" height="88" rx="8" class="c-security" data-animate="node" style="--step:4" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(896 154) scale(0.6875)">
+        <g id="node-proxy" data-node-id="proxy" data-node-label="Egress proxy x2" tabindex="0" role="button" aria-label="Focus Egress proxy x2, key, allowlist, budget, Single host, Docker" aria-pressed="false" data-node-kind="security" data-node-sublabel="key, allowlist, budget" data-node-tag="BUILT" data-node-context="Single host, Docker">
+          <title>Egress proxy x2 · key, allowlist, budget · Single host, Docker · BUILT</title>
+          <rect x="840" y="170" width="180" height="72" rx="8" class="c-mask"/>
+          <rect x="840" y="170" width="180" height="72" rx="8" class="c-security" data-animate="node" style="--step:5" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(846 176) scale(0.6875)">
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="970" y="190" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Egress proxy x2</text>
-        <text data-detail="context" x="970" y="206" class="t-muted" font-size="9" text-anchor="middle">key, budget, journal</text>
+          <text data-node-label="" data-detail-anchor="" x="930" y="204" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Egress proxy x2</text>
+        <text data-detail="context" x="930" y="220" class="t-muted" font-size="9" text-anchor="middle">key, allowlist, budget</text>
+        <text data-detail="fine" x="930" y="234" class="t-security" font-size="7" text-anchor="middle">BUILT</text>
         </g>
 
-        <g id="node-cloud" data-node-id="cloud" data-node-label="Cloud model" tabindex="0" role="button" aria-label="Focus Cloud model, usage.cost, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="usage.cost" data-node-context="Architecture component">
-          <title>Cloud model · usage.cost · Architecture component</title>
-          <rect x="1110" y="88" width="120" height="56" rx="8" class="c-mask"/>
-          <rect x="1110" y="88" width="120" height="56" rx="8" class="c-external" data-animate="node" style="--step:5" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(1116 94) scale(0.6875)">
+        <g id="node-cloud" data-node-id="cloud" data-node-label="Cloud models" tabindex="0" role="button" aria-label="Focus Cloud models, primary, priced, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="primary, priced" data-node-tag="BUILT" data-node-context="Architecture component">
+          <title>Cloud models · primary, priced · Architecture component · BUILT</title>
+          <rect x="1110" y="40" width="180" height="72" rx="8" class="c-mask"/>
+          <rect x="1110" y="40" width="180" height="72" rx="8" class="c-external" data-animate="node" style="--step:6" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(1116 46) scale(0.6875)">
             <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="1170" y="114" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Cloud model</text>
-        <text data-detail="context" x="1170" y="130" class="t-muted" font-size="9" text-anchor="middle">usage.cost</text>
+          <text data-node-label="" data-detail-anchor="" x="1200" y="74" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Cloud models</text>
+        <text data-detail="context" x="1200" y="90" class="t-muted" font-size="9" text-anchor="middle">primary, priced</text>
+        <text data-detail="fine" x="1200" y="104" class="t-external" font-size="7" text-anchor="middle">BUILT</text>
         </g>
 
-        <g id="node-local" data-node-id="local" data-node-label="Local model" tabindex="0" role="button" aria-label="Focus Local model, fallback, charge 0, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="fallback, charge 0" data-node-context="Architecture component">
-          <title>Local model · fallback, charge 0 · Architecture component</title>
-          <rect x="1110" y="188" width="120" height="56" rx="8" class="c-mask"/>
-          <rect x="1110" y="188" width="120" height="56" rx="8" class="c-external" data-animate="node" style="--step:6" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(1116 194) scale(0.6875)">
+        <g id="node-local" data-node-id="local" data-node-label="Self-hosted model" tabindex="0" role="button" aria-label="Focus Self-hosted model, fallback; batch slots designed, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="fallback; batch slots designed" data-node-tag="PARTIAL · §Scheduling" data-node-context="Architecture component">
+          <title>Self-hosted model · fallback; batch slots designed · Architecture component · PARTIAL · §Scheduling</title>
+          <rect x="1110" y="300" width="200" height="72" rx="8" class="c-mask"/>
+          <rect x="1110" y="300" width="200" height="72" rx="8" class="c-external" data-animate="node" style="--step:7" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(1116 306) scale(0.6875)">
             <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="1170" y="214" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Local model</text>
-        <text data-detail="context" x="1170" y="230" class="t-muted" font-size="9" text-anchor="middle">fallback, charge 0</text>
+          <text data-node-label="" data-detail-anchor="" x="1210" y="334" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Self-hosted model</text>
+        <text data-detail="context" x="1210" y="350" class="t-muted" font-size="9" text-anchor="middle">fallback; batch slots designed</text>
+        <rect class="status-badge-partial" x="1160.0" y="356.0" width="100" height="11" rx="2"/><text data-detail="fine" x="1210" y="364" class="t-external" font-size="7" text-anchor="middle">PARTIAL · §Scheduling</text>
         </g>
 
-        <g id="node-mail" data-node-id="mail" data-node-label="Synthetic mail" tabindex="0" role="button" aria-label="Focus Synthetic mail, 30 messages, Single host, Docker" aria-pressed="false" data-node-kind="backend" data-node-sublabel="30 messages" data-node-context="Single host, Docker">
-          <title>Synthetic mail · 30 messages · Single host, Docker</title>
-          <rect x="650" y="328" width="156" height="64" rx="8" class="c-mask"/>
-          <rect x="650" y="328" width="156" height="64" rx="8" class="c-backend" data-animate="node" style="--step:7" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(656 334) scale(0.6875)">
+        <g id="node-person" data-node-id="person" data-node-label="Person" tabindex="0" role="button" aria-label="Focus Person, takes over, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="takes over" data-node-tag="BUILT" data-node-context="Architecture component">
+          <title>Person · takes over · Architecture component · BUILT</title>
+          <rect x="30" y="330" width="170" height="72" rx="8" class="c-mask"/>
+          <rect x="30" y="330" width="170" height="72" rx="8" class="c-external" data-animate="node" style="--step:3" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(36 336) scale(0.6875)">
+            <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
+            <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="115" y="364" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Person</text>
+        <text data-detail="context" x="115" y="380" class="t-muted" font-size="9" text-anchor="middle">takes over</text>
+        <text data-detail="fine" x="115" y="394" class="t-external" font-size="7" text-anchor="middle">BUILT</text>
+        </g>
+
+        <g id="node-watcher" data-node-id="watcher" data-node-label="Lease watcher" tabindex="0" role="button" aria-label="Focus Lease watcher, resume or escalate, Single host, Docker" aria-pressed="false" data-node-kind="backend" data-node-sublabel="resume or escalate" data-node-tag="BUILT" data-node-context="Single host, Docker">
+          <title>Lease watcher · resume or escalate · Single host, Docker · BUILT</title>
+          <rect x="290" y="330" width="170" height="72" rx="8" class="c-mask"/>
+          <rect x="290" y="330" width="170" height="72" rx="8" class="c-backend" data-animate="node" style="--step:3" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(296 336) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="728" y="358" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Synthetic mail</text>
-        <text data-detail="context" x="728" y="374" class="t-muted" font-size="9" text-anchor="middle">30 messages</text>
+          <text data-node-label="" data-detail-anchor="" x="375" y="364" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Lease watcher</text>
+        <text data-detail="context" x="375" y="380" class="t-muted" font-size="9" text-anchor="middle">resume or escalate</text>
+        <text data-detail="fine" x="375" y="394" class="t-backend" font-size="7" text-anchor="middle">BUILT</text>
         </g>
 
-        <g id="node-postgres" data-node-id="postgres" data-node-label="Postgres 16" tabindex="0" role="button" aria-label="Focus Postgres 16, journal, forced RLS, Single host, Docker" aria-pressed="false" data-node-kind="database" data-node-sublabel="journal, forced RLS" data-node-context="Single host, Docker">
-          <title>Postgres 16 · journal, forced RLS · Single host, Docker</title>
-          <rect x="890" y="328" width="160" height="64" rx="8" class="c-mask"/>
-          <rect x="890" y="328" width="160" height="64" rx="8" class="c-database" data-animate="node" style="--step:8" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(896 334) scale(0.6875)">
+        <g id="node-mail" data-node-id="mail" data-node-label="Mail and documents" tabindex="0" role="button" aria-label="Focus Mail and documents, synthetic; live designed, Single host, Docker" aria-pressed="false" data-node-kind="backend" data-node-sublabel="synthetic; live designed" data-node-tag="PARTIAL · §Not building" data-node-context="Single host, Docker">
+          <title>Mail and documents · synthetic; live designed · Single host, Docker · PARTIAL · §Not building</title>
+          <rect x="560" y="330" width="180" height="72" rx="8" class="c-mask"/>
+          <rect x="560" y="330" width="180" height="72" rx="8" class="c-backend" data-animate="node" style="--step:8" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(566 336) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="650" y="364" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Mail and documents</text>
+        <text data-detail="context" x="650" y="380" class="t-muted" font-size="9" text-anchor="middle">synthetic; live designed</text>
+        <rect class="status-badge-partial" x="600.0" y="386.0" width="100" height="11" rx="2"/><text data-detail="fine" x="650" y="394" class="t-backend" font-size="7" text-anchor="middle">PARTIAL · §Not building</text>
+        </g>
+
+        <g id="node-postgres" data-node-id="postgres" data-node-label="Postgres 16" tabindex="0" role="button" aria-label="Focus Postgres 16, journal, outbox, forced RLS, Single host, Docker" aria-pressed="false" data-node-kind="database" data-node-sublabel="journal, outbox, forced RLS" data-node-tag="BUILT" data-node-context="Single host, Docker">
+          <title>Postgres 16 · journal, outbox, forced RLS · Single host, Docker · BUILT</title>
+          <rect x="840" y="330" width="180" height="72" rx="8" class="c-mask"/>
+          <rect x="840" y="330" width="180" height="72" rx="8" class="c-database" data-animate="node" style="--step:9" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(846 336) scale(0.6875)">
             <ellipse cx="8" cy="4" rx="5" ry="2"/>
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="970" y="358" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Postgres 16</text>
-        <text data-detail="context" x="970" y="374" class="t-muted" font-size="9" text-anchor="middle">journal, forced RLS</text>
+          <text data-node-label="" data-detail-anchor="" x="930" y="364" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Postgres 16</text>
+        <text data-detail="context" x="930" y="380" class="t-muted" font-size="9" text-anchor="middle">journal, outbox, forced RLS</text>
+        <text data-detail="fine" x="930" y="394" class="t-database" font-size="7" text-anchor="middle">BUILT</text>
         </g>
 
-        <g id="node-recorded" data-node-id="recorded" data-node-label="Recorded calls" tabindex="0" role="button" aria-label="Focus Recorded calls, replay, Single host, Docker" aria-pressed="false" data-node-kind="database" data-node-sublabel="replay" data-node-context="Single host, Docker">
-          <title>Recorded calls · replay · Single host, Docker</title>
-          <rect x="650" y="468" width="156" height="64" rx="8" class="c-mask"/>
-          <rect x="650" y="468" width="156" height="64" rx="8" class="c-database" data-animate="node" style="--step:9" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(656 474) scale(0.6875)">
+        <g id="node-approver" data-node-id="approver" data-node-label="Memberships" tabindex="0" role="button" aria-label="Focus Memberships, viewer, approver, admin, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="viewer, approver, admin" data-node-tag="BUILT" data-node-context="Architecture component">
+          <title>Memberships · viewer, approver, admin · Architecture component · BUILT</title>
+          <rect x="30" y="490" width="170" height="72" rx="8" class="c-mask"/>
+          <rect x="30" y="490" width="170" height="72" rx="8" class="c-external" data-animate="node" style="--step:9" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(36 496) scale(0.6875)">
+            <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
+            <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="115" y="524" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Memberships</text>
+        <text data-detail="context" x="115" y="540" class="t-muted" font-size="9" text-anchor="middle">viewer, approver, admin</text>
+        <text data-detail="fine" x="115" y="554" class="t-external" font-size="7" text-anchor="middle">BUILT</text>
+        </g>
+
+        <g id="node-send" data-node-id="send" data-node-label="send" tabindex="0" role="button" aria-label="Focus send, separate, after approval, Single host, Docker" aria-pressed="false" data-node-kind="backend" data-node-sublabel="separate, after approval" data-node-tag="BUILT" data-node-context="Single host, Docker">
+          <title>send · separate, after approval · Single host, Docker · BUILT</title>
+          <rect x="290" y="490" width="170" height="72" rx="8" class="c-mask"/>
+          <rect x="290" y="490" width="170" height="72" rx="8" class="c-backend" data-animate="node" style="--step:10" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(296 496) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="375" y="524" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">send</text>
+        <text data-detail="context" x="375" y="540" class="t-muted" font-size="9" text-anchor="middle">separate, after approval</text>
+        <text data-detail="fine" x="375" y="554" class="t-backend" font-size="7" text-anchor="middle">BUILT</text>
+        </g>
+
+        <g id="node-evals" data-node-id="evals" data-node-label="evals run" tabindex="0" role="button" aria-label="Focus evals run, eval gate, Single host, Docker" aria-pressed="false" data-node-kind="backend" data-node-sublabel="eval gate" data-node-tag="BUILT" data-node-context="Single host, Docker">
+          <title>evals run · eval gate · Single host, Docker · BUILT</title>
+          <rect x="560" y="490" width="180" height="72" rx="8" class="c-mask"/>
+          <rect x="560" y="490" width="180" height="72" rx="8" class="c-backend" data-animate="node" style="--step:11" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(566 496) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="650" y="524" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">evals run</text>
+        <text data-detail="context" x="650" y="540" class="t-muted" font-size="9" text-anchor="middle">eval gate</text>
+        <text data-detail="fine" x="650" y="554" class="t-backend" font-size="7" text-anchor="middle">BUILT</text>
+        </g>
+
+        <g id="node-memory" data-node-id="memory" data-node-label="Memory rows" tabindex="0" role="button" aria-label="Focus Memory rows, cursor, facts, summaries, Single host, Docker" aria-pressed="false" data-node-kind="database" data-node-sublabel="cursor, facts, summaries" data-node-tag="BUILT" data-node-context="Single host, Docker">
+          <title>Memory rows · cursor, facts, summaries · Single host, Docker · BUILT</title>
+          <rect x="840" y="490" width="180" height="72" rx="8" class="c-mask"/>
+          <rect x="840" y="490" width="180" height="72" rx="8" class="c-database" data-animate="node" style="--step:12" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(846 496) scale(0.6875)">
             <ellipse cx="8" cy="4" rx="5" ry="2"/>
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="728" y="498" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Recorded calls</text>
-        <text data-detail="context" x="728" y="514" class="t-muted" font-size="9" text-anchor="middle">replay</text>
+          <text data-node-label="" data-detail-anchor="" x="930" y="524" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Memory rows</text>
+        <text data-detail="context" x="930" y="540" class="t-muted" font-size="9" text-anchor="middle">cursor, facts, summaries</text>
+        <text data-detail="fine" x="930" y="554" class="t-database" font-size="7" text-anchor="middle">BUILT</text>
         </g>
 
-        <g id="node-send" data-node-id="send" data-node-label="send" tabindex="0" role="button" aria-label="Focus send, after approval, Single host, Docker" aria-pressed="false" data-node-kind="backend" data-node-sublabel="after approval" data-node-context="Single host, Docker">
-          <title>send · after approval · Single host, Docker</title>
-          <rect x="230" y="468" width="150" height="64" rx="8" class="c-mask"/>
-          <rect x="230" y="468" width="150" height="64" rx="8" class="c-backend" data-animate="node" style="--step:10" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(236 474) scale(0.6875)">
-            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+        <g id="node-recorded" data-node-id="recorded" data-node-label="Recorded calls" tabindex="0" role="button" aria-label="Focus Recorded calls, make drill replay, Architecture component" aria-pressed="false" data-node-kind="database" data-node-sublabel="make drill replay" data-node-tag="BUILT" data-node-context="Architecture component">
+          <title>Recorded calls · make drill replay · Architecture component · BUILT</title>
+          <rect x="1110" y="490" width="180" height="72" rx="8" class="c-mask"/>
+          <rect x="1110" y="490" width="180" height="72" rx="8" class="c-database" data-animate="node" style="--step:12" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(1116 496) scale(0.6875)">
+            <ellipse cx="8" cy="4" rx="5" ry="2"/>
+            <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="305" y="498" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">send</text>
-        <text data-detail="context" x="305" y="514" class="t-muted" font-size="9" text-anchor="middle">after approval</text>
+          <text data-node-label="" data-detail-anchor="" x="1200" y="524" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Recorded calls</text>
+        <text data-detail="context" x="1200" y="540" class="t-muted" font-size="9" text-anchor="middle">make drill replay</text>
+        <text data-detail="fine" x="1200" y="554" class="t-database" font-size="7" text-anchor="middle">BUILT</text>
         </g>
 
-        <g id="node-evals" data-node-id="evals" data-node-label="Eval gate" tabindex="0" role="button" aria-label="Focus Eval gate, block a worse prompt, Single host, Docker" aria-pressed="false" data-node-kind="backend" data-node-sublabel="block a worse prompt" data-node-context="Single host, Docker">
-          <title>Eval gate · block a worse prompt · Single host, Docker</title>
-          <rect x="410" y="468" width="150" height="64" rx="8" class="c-mask"/>
-          <rect x="410" y="468" width="150" height="64" rx="8" class="c-backend" data-animate="node" style="--step:11" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(416 474) scale(0.6875)">
+        <g id="node-drill" data-node-id="drill" data-node-label="make drill" tabindex="0" role="button" aria-label="Focus make drill, 18 scenarios, Architecture component" aria-pressed="false" data-node-kind="backend" data-node-sublabel="18 scenarios" data-node-tag="BUILT" data-node-context="Architecture component">
+          <title>make drill · 18 scenarios · Architecture component · BUILT</title>
+          <rect x="1360" y="490" width="170" height="72" rx="8" class="c-mask"/>
+          <rect x="1360" y="490" width="170" height="72" rx="8" class="c-backend" data-animate="node" style="--step:12" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(1366 496) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="485" y="498" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Eval gate</text>
-        <text data-detail="context" x="485" y="514" class="t-muted" font-size="9" text-anchor="middle">block a worse prompt</text>
+          <text data-node-label="" data-detail-anchor="" x="1445" y="524" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">make drill</text>
+        <text data-detail="context" x="1445" y="540" class="t-muted" font-size="9" text-anchor="middle">18 scenarios</text>
+        <text data-detail="fine" x="1445" y="554" class="t-backend" font-size="7" text-anchor="middle">BUILT</text>
+        </g>
+
+        <g id="node-oidc" data-node-id="oidc" data-node-label="OIDC, web UI" tabindex="0" role="button" aria-label="Focus OIDC, web UI, users as they join, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="users as they join" data-node-tag="DESIGNED · design.md §Not building" data-node-context="Architecture component">
+          <title>OIDC, web UI · users as they join · Architecture component · DESIGNED · design.md §Not building</title>
+          <rect x="30" y="690" width="170" height="72" rx="8" class="c-mask"/>
+          <rect x="30" y="690" width="170" height="72" rx="8" class="c-external" data-animate="node" style="--step:12" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(36 696) scale(0.6875)">
+            <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
+            <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="115" y="724" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">OIDC, web UI</text>
+        <text data-detail="context" x="115" y="740" class="t-muted" font-size="9" text-anchor="middle">users as they join</text>
+        <text data-detail="fine" x="115" y="754" class="t-external" font-size="7" text-anchor="middle">DESIGNED · design.md §Not building</text>
+        </g>
+
+        <g id="node-multihost" data-node-id="multihost" data-node-label="Multi-host scheduling" tabindex="0" role="button" aria-label="Focus Multi-host scheduling, more hosts, Architecture component" aria-pressed="false" data-node-kind="backend" data-node-sublabel="more hosts" data-node-tag="DESIGNED · design.md §Not building" data-node-context="Architecture component">
+          <title>Multi-host scheduling · more hosts · Architecture component · DESIGNED · design.md §Not building</title>
+          <rect x="250" y="690" width="180" height="72" rx="8" class="c-mask"/>
+          <rect x="250" y="690" width="180" height="72" rx="8" class="c-backend" data-animate="node" style="--step:12" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(256 696) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="340" y="724" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Multi-host scheduling</text>
+        <text data-detail="context" x="340" y="740" class="t-muted" font-size="9" text-anchor="middle">more hosts</text>
+        <text data-detail="fine" x="340" y="754" class="t-backend" font-size="7" text-anchor="middle">DESIGNED · design.md §Not building</text>
+        </g>
+
+        <g id="node-panel" data-node-id="panel" data-node-label="Model panel" tabindex="0" role="button" aria-label="Focus Model panel, three models, two rounds, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="three models, two rounds" data-node-tag="DESIGNED · design.md §Panel" data-node-context="Architecture component">
+          <title>Model panel · three models, two rounds · Architecture component · DESIGNED · design.md §Panel</title>
+          <rect x="490" y="690" width="180" height="72" rx="8" class="c-mask"/>
+          <rect x="490" y="690" width="180" height="72" rx="8" class="c-external" data-animate="node" style="--step:12" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(496 696) scale(0.6875)">
+            <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
+            <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="580" y="724" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Model panel</text>
+        <text data-detail="context" x="580" y="740" class="t-muted" font-size="9" text-anchor="middle">three models, two rounds</text>
+        <text data-detail="fine" x="580" y="754" class="t-external" font-size="7" text-anchor="middle">DESIGNED · design.md §Panel</text>
+        </g>
+
+        <g id="node-parent" data-node-id="parent" data-node-label="Parent agent" tabindex="0" role="button" aria-label="Focus Parent agent, claims, how settled, Architecture component" aria-pressed="false" data-node-kind="backend" data-node-sublabel="claims, how settled" data-node-tag="DESIGNED · design.md §Panel" data-node-context="Architecture component">
+          <title>Parent agent · claims, how settled · Architecture component · DESIGNED · design.md §Panel</title>
+          <rect x="720" y="690" width="180" height="72" rx="8" class="c-mask"/>
+          <rect x="720" y="690" width="180" height="72" rx="8" class="c-backend" data-animate="node" style="--step:12" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(726 696) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="810" y="724" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Parent agent</text>
+        <text data-detail="context" x="810" y="740" class="t-muted" font-size="9" text-anchor="middle">claims, how settled</text>
+        <text data-detail="fine" x="810" y="754" class="t-backend" font-size="7" text-anchor="middle">DESIGNED · design.md §Panel</text>
+        </g>
+
+        <g id="node-microvm" data-node-id="microvm" data-node-label="Firecracker microVMs" tabindex="0" role="button" aria-label="Focus Firecracker microVMs, warm pool, Architecture component" aria-pressed="false" data-node-kind="security" data-node-sublabel="warm pool" data-node-tag="DESIGNED · design.md §Weakest part" data-node-context="Architecture component">
+          <title>Firecracker microVMs · warm pool · Architecture component · DESIGNED · design.md §Weakest part</title>
+          <rect x="960" y="690" width="180" height="72" rx="8" class="c-mask"/>
+          <rect x="960" y="690" width="180" height="72" rx="8" class="c-security" data-animate="node" style="--step:12" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(966 696) scale(0.6875)">
+            <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
+            <path d="m5.8 8 1.5 1.5 3-3"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="1050" y="724" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Firecracker microVMs</text>
+        <text data-detail="context" x="1050" y="740" class="t-muted" font-size="9" text-anchor="middle">warm pool</text>
+        <text data-detail="fine" x="1050" y="754" class="t-security" font-size="7" text-anchor="middle">DESIGNED · design.md §Weakest part</text>
+        </g>
+
+        <g id="node-broker" data-node-id="broker" data-node-label="Vault and broker" tabindex="0" role="button" aria-label="Focus Vault and broker, 5-minute tokens, mTLS, Architecture component" aria-pressed="false" data-node-kind="security" data-node-sublabel="5-minute tokens, mTLS" data-node-tag="DESIGNED · design.md §Weakest part" data-node-context="Architecture component">
+          <title>Vault and broker · 5-minute tokens, mTLS · Architecture component · DESIGNED · design.md §Weakest part</title>
+          <rect x="1180" y="690" width="180" height="72" rx="8" class="c-mask"/>
+          <rect x="1180" y="690" width="180" height="72" rx="8" class="c-security" data-animate="node" style="--step:12" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(1186 696) scale(0.6875)">
+            <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
+            <path d="m5.8 8 1.5 1.5 3-3"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="1270" y="724" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Vault and broker</text>
+        <text data-detail="context" x="1270" y="740" class="t-muted" font-size="9" text-anchor="middle">5-minute tokens, mTLS</text>
+        <text data-detail="fine" x="1270" y="754" class="t-security" font-size="7" text-anchor="middle">DESIGNED · design.md §Weakest part</text>
+        </g>
+
+        <g id="node-replica" data-node-id="replica" data-node-label="Postgres replica" tabindex="0" role="button" aria-label="Focus Postgres replica, synchronous, lease fences, Architecture component" aria-pressed="false" data-node-kind="database" data-node-sublabel="synchronous, lease fences" data-node-tag="DESIGNED · design.md §Weakest part" data-node-context="Architecture component">
+          <title>Postgres replica · synchronous, lease fences · Architecture component · DESIGNED · design.md §Weakest part</title>
+          <rect x="1400" y="690" width="180" height="72" rx="8" class="c-mask"/>
+          <rect x="1400" y="690" width="180" height="72" rx="8" class="c-database" data-animate="node" style="--step:12" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(1406 696) scale(0.6875)">
+            <ellipse cx="8" cy="4" rx="5" ry="2"/>
+            <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="1490" y="724" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Postgres replica</text>
+        <text data-detail="context" x="1490" y="740" class="t-muted" font-size="9" text-anchor="middle">synchronous, lease fences</text>
+        <text data-detail="fine" x="1490" y="754" class="t-database" font-size="7" text-anchor="middle">DESIGNED · design.md §Weakest part</text>
         </g>
 
         <!-- Connection labels -->
-        <g data-detail="context" data-edge-from="config" data-edge-to="scheduler" data-edge-label="yaml" data-edge-key="0" data-edge-id="yaml">
-          <rect x="188" y="180" width="30" height="14" rx="3" class="c-mask"/>
-          <text x="203" y="190" class="t-edge-default" font-size="8" text-anchor="middle">yaml</text>
+        <g data-detail="context" data-edge-from="config" data-edge-to="scheduler" data-edge-label="yaml" data-edge-key="0" data-edge-id="c1">
+          <rect x="230" y="179" width="30" height="14" rx="3" class="c-mask"/>
+          <text x="245" y="189" class="t-edge-default" font-size="8" text-anchor="middle">yaml</text>
         </g>
-        <g data-detail="context" data-edge-from="scheduler" data-edge-to="person" data-edge-label="escalate" data-edge-key="1" data-edge-id="escalate">
-          <rect x="280.8" y="148" width="48.4" height="14" rx="3" class="c-mask"/>
-          <text x="305" y="158" class="t-edge-security" font-size="8" text-anchor="middle">escalate</text>
+        <g data-detail="context" data-edge-from="scheduler" data-edge-to="container" data-edge-label="start" data-edge-key="1" data-edge-id="c2">
+          <rect x="493" y="177.95" width="34" height="14" rx="3" class="c-mask"/>
+          <text x="510" y="187.95" class="t-edge-emphasis" font-size="8" text-anchor="middle">start</text>
         </g>
-        <g data-detail="context" data-edge-from="drill" data-edge-to="container" data-edge-label="kill, escape" data-edge-key="2" data-edge-id="locked">
-          <rect x="561.2" y="176" width="67.6" height="14" rx="3" class="c-mask"/>
-          <text x="595" y="186" class="t-edge-emphasis" font-size="8" text-anchor="middle">kill, escape</text>
+        <g data-detail="context" data-edge-from="scheduler" data-edge-to="person" data-edge-label="escalate" data-edge-key="2" data-edge-id="c3">
+          <rect x="220.8" y="269.5" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="245" y="279.5" class="t-edge-security" font-size="8" text-anchor="middle">escalate</text>
         </g>
-        <g data-detail="context" data-edge-from="container" data-edge-to="proxy" data-edge-label="run token" data-edge-key="3" data-edge-id="token">
-          <rect x="821.4" y="163.95" width="53.199999999999996" height="14" rx="3" class="c-mask"/>
-          <text x="848" y="173.95" class="t-edge-emphasis" font-size="8" text-anchor="middle">run token</text>
+        <g data-detail="context" data-edge-from="watcher" data-edge-to="container" data-edge-label="resume" data-edge-key="3" data-edge-id="c4">
+          <rect x="490.6" y="269.5" width="38.8" height="14" rx="3" class="c-mask"/>
+          <text x="510" y="279.5" class="t-edge-default" font-size="8" text-anchor="middle">resume</text>
         </g>
-        <g data-detail="context" data-edge-from="proxy" data-edge-to="cloud" data-edge-label="key" data-edge-key="4" data-edge-id="key">
-          <rect x="1071" y="130.5" width="30" height="14" rx="3" class="c-mask"/>
-          <text x="1086" y="140.5" class="t-edge-security" font-size="8" text-anchor="middle">key</text>
+        <g data-detail="context" data-edge-from="container" data-edge-to="proxy" data-edge-label="run token" data-edge-key="4" data-edge-id="c5">
+          <rect x="763.4" y="177.95" width="53.199999999999996" height="14" rx="3" class="c-mask"/>
+          <text x="790" y="187.95" class="t-edge-emphasis" font-size="8" text-anchor="middle">run token</text>
         </g>
-        <g data-detail="context" data-edge-from="proxy" data-edge-to="local" data-edge-label="local" data-edge-key="5" data-edge-id="fallback">
-          <rect x="1098" y="169.5" width="34" height="14" rx="3" class="c-mask"/>
-          <text x="1115" y="179.5" class="t-edge-dashed" font-size="8" text-anchor="middle">local</text>
+        <g data-detail="context" data-edge-from="proxy" data-edge-to="cloud" data-edge-label="real key" data-edge-key="5" data-edge-id="c6">
+          <rect x="1101.8" y="129" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="1126" y="139" class="t-edge-security" font-size="8" text-anchor="middle">real key</text>
         </g>
-        <g data-detail="context" data-edge-from="proxy" data-edge-to="mail" data-edge-label="tenant scope" data-edge-key="6" data-edge-id="scope">
-          <rect x="814.2" y="259.5" width="67.6" height="14" rx="3" class="c-mask"/>
-          <text x="848" y="269.5" class="t-edge-security" font-size="8" text-anchor="middle">tenant scope</text>
+        <g data-detail="context" data-edge-from="proxy" data-edge-to="local" data-edge-label="fallback" data-edge-key="6" data-edge-id="c7">
+          <rect x="1032.8" y="296" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="1057" y="306" class="t-edge-dashed" font-size="8" text-anchor="middle">fallback</text>
         </g>
-        <g data-detail="context" data-edge-from="proxy" data-edge-to="postgres" data-edge-label="journal" data-edge-key="7" data-edge-id="journal">
-          <rect x="927.4000000000001" y="275" width="43.6" height="14" rx="3" class="c-mask"/>
-          <text x="949.2" y="285" class="t-edge-default" font-size="8" text-anchor="middle">journal</text>
+        <g data-detail="context" data-edge-from="proxy" data-edge-to="mail" data-edge-label="tenant scope" data-edge-key="7" data-edge-id="c8">
+          <rect x="756.2" y="269.5" width="67.6" height="14" rx="3" class="c-mask"/>
+          <text x="790" y="279.5" class="t-edge-security" font-size="8" text-anchor="middle">tenant scope</text>
         </g>
-        <g data-detail="context" data-edge-from="proxy" data-edge-to="recorded" data-edge-label="replay" data-edge-key="8" data-edge-id="replay">
-          <rect x="1054.6" y="336.5" width="38.8" height="14" rx="3" class="c-mask"/>
-          <text x="1074" y="346.5" class="t-edge-dashed" font-size="8" text-anchor="middle">replay</text>
+        <g data-detail="context" data-edge-from="proxy" data-edge-to="postgres" data-edge-label="journal" data-edge-key="8" data-edge-id="c9">
+          <rect x="880.4000000000001" y="279" width="43.6" height="14" rx="3" class="c-mask"/>
+          <text x="902.2" y="289" class="t-edge-default" font-size="8" text-anchor="middle">journal</text>
         </g>
-        <g data-detail="context" data-edge-from="approver" data-edge-to="send" data-edge-label="approves" data-edge-key="9" data-edge-id="approve">
-          <rect x="178.8" y="480" width="48.4" height="14" rx="3" class="c-mask"/>
-          <text x="203" y="490" class="t-edge-security" font-size="8" text-anchor="middle">approves</text>
+        <g data-detail="context" data-edge-from="approver" data-edge-to="send" data-edge-label="approves" data-edge-key="9" data-edge-id="c10">
+          <rect x="220.8" y="506" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="245" y="516" class="t-edge-security" font-size="8" text-anchor="middle">approves</text>
         </g>
-        <g data-detail="context" data-edge-from="send" data-edge-to="postgres" data-edge-label="message id" data-edge-key="10" data-edge-id="sent">
-          <rect x="601.5" y="396" width="58" height="14" rx="3" class="c-mask"/>
-          <text x="630.5" y="406" class="t-edge-default" font-size="8" text-anchor="middle">message id</text>
+        <g data-detail="context" data-edge-from="send" data-edge-to="postgres" data-edge-label="outbox" data-edge-key="10" data-edge-id="c11">
+          <rect x="537.6" y="445.5" width="38.8" height="14" rx="3" class="c-mask"/>
+          <text x="557" y="455.5" class="t-edge-default" font-size="8" text-anchor="middle">outbox</text>
         </g>
-        <g data-detail="context" data-edge-from="evals" data-edge-to="postgres" data-edge-label="eval row" data-edge-key="11" data-edge-id="evalrow">
-          <rect x="430.6" y="442" width="48.4" height="14" rx="3" class="c-mask"/>
-          <text x="454.8" y="452" class="t-edge-default" font-size="8" text-anchor="middle">eval row</text>
+        <g data-detail="context" data-edge-from="evals" data-edge-to="memory" data-edge-label="eval_record" data-edge-key="11" data-edge-id="c12">
+          <rect x="758.6" y="506" width="62.8" height="14" rx="3" class="c-mask"/>
+          <text x="790" y="516" class="t-edge-dashed" font-size="8" text-anchor="middle">eval_record</text>
+        </g>
+        <g data-detail="context" data-edge-from="panel" data-edge-to="parent" data-edge-label="answers, challenges" data-edge-key="12" data-edge-id="c13">
+          <rect x="643.4" y="676" width="101.2" height="14" rx="3" class="c-mask"/>
+          <text x="694" y="686" class="t-edge-dashed" font-size="8" text-anchor="middle">answers, challenges</text>
+        </g>
+        <g data-detail="context" data-edge-from="drill" data-edge-to="recorded" data-edge-label="replay" data-edge-key="13" data-edge-id="c14">
+          <rect x="1305.6" y="506" width="38.8" height="14" rx="3" class="c-mask"/>
+          <text x="1325" y="516" class="t-edge-default" font-size="8" text-anchor="middle">replay</text>
         </g>
 
         <!-- Boundary labels (foreground masks keep routes out of titles) -->
         <g data-graph-role="structural-frame-label" data-composition-frame-id="0" data-composition-frame-kind="region" data-composition-frame-label="Single host, Docker">
-          <rect data-graph-role="structural-frame-label-mask" x="313" y="128" width="112.6" height="16" rx="3" class="c-mask"/>
-          <text data-boundary-label="" x="317" y="141" class="t-cloud" font-size="9" font-weight="600">Single host, Docker</text>
-        </g>
-
-        <g data-graph-role="structural-frame-label" data-composition-frame-id="1" data-composition-frame-kind="security-group" data-composition-frame-label="Internal network, proxies only">
-          <rect data-graph-role="structural-frame-label-mask" x="624" y="128" width="172" height="16" rx="3" class="c-mask"/>
-          <text data-boundary-label="" x="628" y="141" class="t-security" font-size="9" font-weight="600">Internal network, proxies only</text>
+          <rect data-graph-role="structural-frame-label-mask" x="264" y="148" width="129.14839849677418" height="18" rx="3" class="c-mask"/>
+          <text data-boundary-label="" x="268" y="162.4516139032258" class="t-cloud" font-size="10.451613903225805" font-weight="600">Single host, Docker</text>
         </g>
 
         <!-- Legend -->
         <g data-legend="" data-legend-bridge="">
-          <text x="40" y="584" class="t-primary" font-size="12" font-weight="650">Legend</text>
-          <g data-legend-semantic-kind="frontend" data-legend-kind="frontend" data-legend-label="Frontend" data-legend-x="40" data-legend-baseline="604" data-legend-width="93">
-            <rect x="40" y="595" width="16" height="10" rx="2.5" class="c-frontend" stroke-width="1"/>
-            <text x="62" y="604" class="t-muted" font-size="10" font-weight="500">Frontend</text>
+          <text x="40" y="794" class="t-primary" font-size="12" font-weight="650">Legend</text>
+          <g data-legend-semantic-kind="frontend" data-legend-kind="frontend" data-legend-label="Frontend" data-legend-x="40" data-legend-baseline="814" data-legend-width="93">
+            <rect x="40" y="805" width="16" height="10" rx="2.5" class="c-frontend" stroke-width="1"/>
+            <text x="62" y="814" class="t-muted" font-size="10" font-weight="500">Frontend</text>
           </g>
-          <g data-legend-semantic-kind="backend" data-legend-kind="backend" data-legend-label="Backend" data-legend-x="155" data-legend-baseline="604" data-legend-width="87">
-            <rect x="155" y="595" width="16" height="10" rx="2.5" class="c-backend" stroke-width="1"/>
-            <text x="177" y="604" class="t-muted" font-size="10" font-weight="500">Backend</text>
+          <g data-legend-semantic-kind="backend" data-legend-kind="backend" data-legend-label="Backend" data-legend-x="155" data-legend-baseline="814" data-legend-width="87">
+            <rect x="155" y="805" width="16" height="10" rx="2.5" class="c-backend" stroke-width="1"/>
+            <text x="177" y="814" class="t-muted" font-size="10" font-weight="500">Backend</text>
           </g>
-          <g data-legend-semantic-kind="database" data-legend-kind="database" data-legend-label="Database" data-legend-x="264" data-legend-baseline="604" data-legend-width="93">
-            <rect x="264" y="595" width="16" height="10" rx="2.5" class="c-database" stroke-width="1"/>
-            <text x="286" y="604" class="t-muted" font-size="10" font-weight="500">Database</text>
+          <g data-legend-semantic-kind="database" data-legend-kind="database" data-legend-label="Database" data-legend-x="264" data-legend-baseline="814" data-legend-width="93">
+            <rect x="264" y="805" width="16" height="10" rx="2.5" class="c-database" stroke-width="1"/>
+            <text x="286" y="814" class="t-muted" font-size="10" font-weight="500">Database</text>
           </g>
-          <g data-legend-semantic-kind="security" data-legend-kind="security" data-legend-label="Security" data-legend-x="379" data-legend-baseline="604" data-legend-width="93">
-            <rect x="379" y="595" width="16" height="10" rx="2.5" class="c-security" stroke-width="1"/>
-            <text x="401" y="604" class="t-muted" font-size="10" font-weight="500">Security</text>
+          <g data-legend-semantic-kind="security" data-legend-kind="security" data-legend-label="Security" data-legend-x="379" data-legend-baseline="814" data-legend-width="93">
+            <rect x="379" y="805" width="16" height="10" rx="2.5" class="c-security" stroke-width="1"/>
+            <text x="401" y="814" class="t-muted" font-size="10" font-weight="500">Security</text>
           </g>
-          <g data-legend-semantic-kind="external" data-legend-kind="external" data-legend-label="External" data-legend-x="494" data-legend-baseline="604" data-legend-width="93">
-            <rect x="494" y="595" width="16" height="10" rx="2.5" class="c-external" stroke-width="1"/>
-            <text x="516" y="604" class="t-muted" font-size="10" font-weight="500">External</text>
+          <g data-legend-semantic-kind="external" data-legend-kind="external" data-legend-label="External" data-legend-x="494" data-legend-baseline="814" data-legend-width="93">
+            <rect x="494" y="805" width="16" height="10" rx="2.5" class="c-external" stroke-width="1"/>
+            <text x="516" y="814" class="t-muted" font-size="10" font-weight="500">External</text>
           </g>
         </g>
       </svg>
@@ -5694,15 +5849,12 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <h3>Scheduling 200 agents</h3>
         </div>
         <ul>
-          <li>Earliest deadline first, minute by minute. A job escalates only when it can no longer meet its deadline.</li>
-          <li>Host cap 8, a per-tenant cap, and a 90 minute window.</li>
-          <li>200 ten-minute jobs place 72 and escalate 128.</li>
-          <li>Each provider's tokens and requests per minute are split across the tenants using it. The dispatch scenario runs dispatch_once.</li>
-          <li>A 429 waits the longer of a jittered backoff capped at 8 s and Retry-After capped at 60 s. The SDK's own retries are off (max_retries=0).</li>
-          <li>The proxy forwards an upstream Retry-After. Its own quota 429 reports Retry-After to the next minute for information only; the agent does not wait on it.</li>
-          <li>free_tier_daily_limit is never retried and never sent to another Gateway model. It falls back to local, or escalates.</li>
-          <li>The drill has eighteen scenarios, including daily_limit.</li>
-          <li>The runner checks max_steps, max_tokens and wall_s before every call. A breach stores STOPPED_BUDGET.</li>
+          <li>Design: deadlines, not start minutes; earliest deadline first</li>
+          <li>Design: provider, tenant and host limits; a self-hosted model is one more provider sized by batch slots</li>
+          <li>Built: deadline first, host cap 8, per-tenant caps, provider tokens split per tenant</li>
+          <li>Built: 429 backoff with jitter, at least an upstream Retry-After capped at 60 s; the proxy&#39;s quota 429 does not set the wait</li>
+          <li>Built: free_tier_daily_limit is never retried; falls back to local or escalates</li>
+          <li>Designed: multi-host scheduling</li>
         </ul>
       </div>
 
@@ -5712,12 +5864,11 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <h3>Sandbox</h3>
         </div>
         <ul>
-          <li>User 65534, read-only root, no capabilities, 512 MB, half a CPU, 64 processes.</li>
-          <li>64 MB /tmp, noexec. Each tenant has its own internal network, swarm-agents-t-a and so on.</li>
-          <li>The only mount is the tenant's config directory, read-only. The token is not the provider key.</li>
-          <li>The proxy refuses py.exec with not_executed and starts no process.</li>
-          <li>Spreadsheet code runs in the agent process. Cells arrive on stdin.</li>
-          <li>Every agent scenario in the drill runs in a fresh locked container.</li>
+          <li>Built: new container per run, regular user, read-only root, 64 MB scratch, no extra capabilities</li>
+          <li>Built: proxy is the only peer; the run token is bound to the container IP and is not a credential</li>
+          <li>Built: py.exec runs in the container; the proxy answers not_executed</li>
+          <li>Built: foreign mail, CONNECT and loopback are denied and logged</li>
+          <li>Designed: Firecracker microVM per run from a warm pool</li>
         </ul>
       </div>
 
@@ -5727,27 +5878,25 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <h3>Failure and resume</h3>
         </div>
         <ul>
-          <li>Step key: run, step number, hash of messages and tools. The model is outside the hash.</li>
-          <li>A STARTED step for the same generation returns 202 at any age. The reservation stays. No second provider call.</li>
-          <li>If the client is still on 202 after about 90 seconds, the runner stores FAILED, artifact in_progress. It does not store SUCCEEDED.</li>
-          <li>Only a newer generation, from bind_token on resume, takes over and sets cost_uncertain.</li>
-          <li>finish_step writes only when generation and started_at still match.</li>
-          <li>The lease watcher resumes the first two lease expiries in a fresh container. The third escalates.</li>
+          <li>Built: step key is run, step number and a hash of messages and tools; the model is not in it</li>
+          <li>Built: the lease watcher resumes expired runs; the third lease expiry escalates</li>
+          <li>Built: tool errors retry, hangs cancel and retry once, three errors or throttling fall back</li>
+          <li>Built: loops stop as STOPPED_LOOP and over-budget calls as STOPPED_BUDGET, with progress saved</li>
+          <li>Built: no artifact or no valid cites line is FAILED, never SUCCEEDED</li>
+          <li>Built: make drill runs 18 scenarios on recorded calls</li>
         </ul>
       </div>
 
       <div class="card">
         <div class="card-header">
           <div class="card-dot amber"></div>
-          <h3>Tenants, evals, memory</h3>
+          <h3>Tenants, auth, evals, memory</h3>
         </div>
         <ul>
-          <li>A membership is one tenant and a role: viewer, approver, or admin. There is no signup flow.</li>
-          <li>The proxy resolves the token. Forced RLS hides other tenants. An unset tenant sees no rows.</li>
-          <li>20 recorded cases. Hard checks, then a mean drop of at most 0.3. The weakened prompt is refused.</li>
-          <li>Committed document recordings are all judge score 1.</li>
-          <li>A cited mail id is stored as a cursor on SUCCEEDED. mail.list returns only mail after it.</li>
-          <li>Panel, design only: three models, two rounds, minority view kept.</li>
+          <li>Built: one membership row per user with a role; proxy tenant scope plus forced RLS</li>
+          <li>Designed: OIDC sign-in and a web UI as users join</li>
+          <li>Built: recorded cases, hard checks, temperature-0 judge; a mean drop above 0.3 is refused</li>
+          <li>Built: memory rows per tenant and agent; the cursor moves only on SUCCEEDED; facts and summaries load as quoted data</li>
         </ul>
       </div>
 
@@ -5757,36 +5906,21 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <h3>Drafts and approval</h3>
         </div>
         <ul>
-          <li>Agents write drafts and cannot send.</li>
-          <li>Only an approver in the same tenant can approve a send.</li>
-          <li>SMTP runs before the sink. A message id already in the log is not sent again.</li>
-          <li>A recipient outside the tenant domains stays a flagged draft.</li>
-        </ul>
-      </div>
-
-      <div class="card">
-        <div class="card-header">
-          <div class="card-dot orange"></div>
-          <h3>Project usage</h3>
-        </div>
-        <ul>
-          <li>GET project usage returns total_spend, request_count, and model_spend.</li>
-          <li>model_spend is per model, and its granularity is month.</li>
-          <li>One response carries usage.cost. The journal stores it. Replay charges that figure.</li>
-          <li>A recorded cloud call sends X-Project-Id and trace headers. Replay does not call Gateway.</li>
-          <li>A management key with read_usage is required. The model key cannot call it.</li>
+          <li>Built: agents write drafts and cannot send</li>
+          <li>Built: send needs an approver in the same tenant; Message-ID comes from the draft id, so a replay does not send twice</li>
+          <li>Built: external or attached drafts are flagged and need their own approval</li>
         </ul>
       </div>
 
       <div class="card">
         <div class="card-header">
           <div class="card-dot slate"></div>
-          <h3>Not building, and the weakest part</h3>
+          <h3>Panel and hardening (designed)</h3>
         </div>
         <ul>
-          <li>Not built: live connectors, a web UI, OIDC, a replica, multi-host scheduling, and the panel.</li>
-          <li>No gVisor or Firecracker, so runs share the host kernel.</li>
-          <li>The proxy holds the provider key, the tenant check, and the budget. One bug there is every tenant&#39;s bug.</li>
+          <li>Panel: three models answer blind, then challenge each other&#39;s claims over two rounds</li>
+          <li>Parent agent returns agreed claims, contested claims with how each was settled, and any minority view</li>
+          <li>Weakest part is the proxy; hardening: canary IDs and a fuzzer, microVMs, vault and broker, mutual TLS, a synchronous replica</li>
         </ul>
       </div>
     </div>
