@@ -1,6 +1,8 @@
+import http.client
 import json
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 
@@ -54,6 +56,30 @@ class ProxyClient:
             "/v1/event",
             {"token": self.token, "event": event, "detail": detail},
         )
+        body["status"] = status
+        return body
+
+    def heartbeat(self) -> dict:
+        """Renews the run's lease while the agent works locally (py.exec, sheet program)."""
+        status, body = self._send("POST", "/v1/heartbeat", {"token": self.token})
+        body["status"] = status
+        return body
+
+    def forward(self, method: str, target: str) -> dict:
+        """Use the proxy as a forward proxy (CONNECT host:port or an absolute URL). The proxy refuses these."""
+        parsed = urllib.parse.urlsplit(self.base_url)
+        conn = http.client.HTTPConnection(parsed.hostname, parsed.port or 80, timeout=30)
+        try:
+            conn.request(method, target, headers={"X-Run-Token": self.token})
+            response = conn.getresponse()
+            raw = response.read().decode()
+            status = response.status
+        finally:
+            conn.close()
+        try:
+            body = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            body = {"error": raw}
         body["status"] = status
         return body
 

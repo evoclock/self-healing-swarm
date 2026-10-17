@@ -18,13 +18,14 @@ from runtime.scheduler import Job, schedule, transition
 from runtime.watcher import resume_in_container, watch_once
 
 
-def dispatch_once(jobs, tenant_caps, launch, escalate, host_cap=8, window=90, provider_caps=None):
+def dispatch_once(jobs, tenant_caps, launch, escalate, host_cap=8, window=90, provider_caps=None, provider_tpm=None):
     """Start the jobs schedule() places at minute 0; escalate the ones it predicts will miss their deadline.
 
+    provider_tpm splits each provider's tokens per minute across tenants (a token bucket per tenant).
     Jobs placed later are left for a later pass. Returns the placements.
     """
     by_id = {job.job_id: job for job in jobs}
-    placements = schedule(tuple(jobs), tenant_caps, host_cap, window, provider_caps)
+    placements = schedule(tuple(jobs), tenant_caps, host_cap, window, provider_caps, provider_tpm)
     for placement in placements:
         if placement.escalated:
             escalate(by_id[placement.job_id])
@@ -75,7 +76,13 @@ def jobs_for_today(root: Path, now: datetime):
         hour, minute = (int(part) for part in config.deadline.split(":"))
         due = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         run_id = f"{config.id}-{config.tenant_id}-{now:%Y%m%d}"
-        job = Job(run_id, config.tenant_id, max(1, math.ceil(config.limits.wall_s / 60)), int((due - now).total_seconds() // 60))
+        job = Job(
+            run_id,
+            config.tenant_id,
+            max(1, math.ceil(config.limits.wall_s / 60)),
+            int((due - now).total_seconds() // 60),
+            tokens=config.limits.max_tokens,
+        )
         jobs[run_id] = (job, config, str(path))
     return jobs
 
@@ -83,6 +90,7 @@ def jobs_for_today(root: Path, now: datetime):
 def main() -> int:
     conn = connect(os.environ["DATABASE_URL"])
     caps = {tenant: int(os.environ.get("TENANT_CAP", "2")) for tenant in ("t-a", "t-b", "t-c", "t-d")}
+    tpm = {"primary": int(os.environ["PROVIDER_TPM"])} if os.environ.get("PROVIDER_TPM") else None
     while True:
         now = datetime.now()
         planned = jobs_for_today(Path("agents"), now)
@@ -101,7 +109,7 @@ def main() -> int:
             _job, config, path = planned[job.job_id]
             escalate_run(conn, job.tenant_id, job.job_id, config.id, path, RunPolicy.from_config(config))
 
-        dispatch_once(waiting, caps, launch, escalate)
+        dispatch_once(waiting, caps, launch, escalate, provider_tpm=tpm)
         for tenant, run_id, state in watch_once(conn, lambda tenant, run_id: resume_in_container(conn, tenant, run_id)):
             print(f"watcher {tenant}.{run_id} {state}", flush=True)
         time.sleep(60)

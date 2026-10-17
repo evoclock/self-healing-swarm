@@ -9,6 +9,7 @@ from runtime.memory import MemoryRefused, memory_write
 from runtime.policy import RunPolicy
 from runtime.scheduler import IllegalTransition, transition
 
+NO_NEW_MAIL = "no new mail"
 PROXY_TOOLS = frozenset({"mail.list", "mail.read", "docs.read", "memory.write", "draft.create"})
 
 
@@ -149,14 +150,13 @@ def perform(conn, bound: Bound, name: str, args: dict) -> dict:
     tenant = bound.tenant_id
     conn.execute("SELECT set_config('app.tenant_id', %s, false)", (tenant,))
     if name == "mail.list":
-        rows = conn.execute(
-            """
-            SELECT id, from_addr, to_addr, subject, body, attachment_id
-            FROM mail WHERE tenant_id = %s ORDER BY id
-            """,
-            (tenant,),
-        ).fetchall()
-        return {"messages": [_mail(row, tenant) for row in rows], "domains": _domains(conn, tenant)}
+        agent_id = _agent(conn, bound.run_id)
+        rows = _mail_after_cursor(conn, tenant, agent_id)
+        result = {"messages": [_mail(row, tenant) for row in rows], "domains": _domains(conn, tenant)}
+        facts = _facts(conn, tenant, agent_id)
+        if facts:
+            result["facts"] = facts
+        return result
     if name == "mail.read":
         ids = [str(item) for item in args.get("ids") or []]
         rows = conn.execute(
@@ -222,10 +222,12 @@ def finish_state(conn, bound: Bound, state: str, artifact: str) -> Finished:
             cited = parse_cites(artifact)
             mail_ids = _owned(conn, "mail", tenant, cited)
             doc_ids = _owned(conn, "documents", tenant, cited)
-            if not cited or any(item not in mail_ids and item not in doc_ids for item in cited):
+            if not cited and artifact.strip() == NO_NEW_MAIL and not _mail_after_cursor(conn, tenant, agent_id):
+                pass  # nothing past the cursor: an empty brief is correct, checked here rather than trusted
+            elif not cited or any(item not in mail_ids and item not in doc_ids for item in cited):
                 state = "FAILED"
             else:
-                cursor = next((item for item in reversed(cited) if item in mail_ids), None)
+                cursor = _latest(conn, tenant, [item for item in cited if item in mail_ids])
         try:
             nxt = transition(current, state)
         except IllegalTransition as exc:
@@ -235,6 +237,52 @@ def finish_state(conn, bound: Bound, state: str, artifact: str) -> Finished:
             memory_write(conn, tenant, agent_id, "cursor", cursor, (cursor,), run_id)
         write_event(conn, tenant, run_id, "state", {"state": nxt})
     return Finished(200, {"state": nxt})
+
+
+def _agent(conn, run_id: str) -> str:
+    return conn.execute("SELECT agent_id FROM runs WHERE id = %s", (run_id,)).fetchone()[0]
+
+
+def _mail_after_cursor(conn, tenant: str, agent_id: str) -> list:
+    """The tenant's mail after this agent's stored cursor, oldest first; all of it when no cursor."""
+    return conn.execute(
+        """
+        WITH c AS (
+            SELECT m.received_at, m.id FROM memory k
+            JOIN mail m ON m.id = k.body AND m.tenant_id = k.tenant_id
+            WHERE k.tenant_id = %s AND k.agent_id = %s AND k.kind = 'cursor'
+            ORDER BY m.received_at DESC, m.id DESC LIMIT 1
+        )
+        SELECT mail.id, from_addr, to_addr, subject, body, attachment_id
+        FROM mail LEFT JOIN c ON true
+        WHERE mail.tenant_id = %s
+          AND (c.id IS NULL OR (mail.received_at, mail.id) > (c.received_at, c.id))
+        ORDER BY mail.received_at, mail.id
+        """,
+        (tenant, agent_id, tenant),
+    ).fetchall()
+
+
+def _latest(conn, tenant: str, ids: list) -> str | None:
+    if not ids:
+        return None
+    row = conn.execute(
+        "SELECT id FROM mail WHERE tenant_id = %s AND id = ANY(%s) ORDER BY received_at DESC, id DESC LIMIT 1",
+        (tenant, ids),
+    ).fetchone()
+    return row[0] if row else None
+
+
+def _facts(conn, tenant: str, agent_id: str) -> list[str]:
+    rows = conn.execute(
+        """
+        SELECT body FROM memory
+        WHERE tenant_id = %s AND agent_id = %s AND kind = 'fact' AND NOT flagged
+        ORDER BY created_at, id
+        """,
+        (tenant, agent_id),
+    ).fetchall()
+    return [row[0] for row in rows]
 
 
 def _deny(conn, bound: Bound, name: str, reason: str) -> Finished:

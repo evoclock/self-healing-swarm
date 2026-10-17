@@ -20,3 +20,24 @@ def test_a_job_placed_later_is_left_for_a_later_pass():
     dispatch_once(jobs, {"t-a": 1}, launched.append, escalated.append, host_cap=8)
     assert [job.job_id for job in launched] == ["a"]
     assert escalated == []
+
+
+def test_dispatch_splits_provider_tokens_per_tenant():
+    from runtime.dispatch import dispatch_once
+    from runtime.scheduler import Job
+
+    jobs = [Job("a1", "t-a", 1, 30, tokens=1000), Job("a2", "t-a", 1, 30, tokens=1000), Job("b1", "t-b", 1, 30, tokens=1000)]
+    started = []
+    placements = dispatch_once(jobs, {"t-a": 2, "t-b": 2}, lambda job: started.append(job.job_id), lambda job: None, provider_tpm={"primary": 3000})
+    assert sorted(started) == ["a1", "b1"]
+    assert {p.job_id: p.start for p in placements}["a2"] == 1
+
+
+def test_jobs_for_today_carry_the_token_limit():
+    from datetime import datetime
+    from pathlib import Path
+
+    from runtime.dispatch import jobs_for_today
+
+    jobs = jobs_for_today(Path("agents"), datetime(2026, 10, 17, 6, 0))
+    assert all(job.tokens == config.limits.max_tokens for job, config, _path in jobs.values())

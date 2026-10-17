@@ -52,3 +52,21 @@ def test_provider_concurrency_is_a_limit():
     placed = schedule(jobs, {f"t-{index}": 1 for index in range(6)}, host_cap=8, window=90, provider_caps={"primary": 2})
     assert not [item for item in placed if item.escalated]
     assert max(len(_active(placed, minute)) for minute in range(90)) == 2
+
+
+def test_provider_tokens_per_minute_are_split_across_tenants():
+    # 2000 tokens a minute on primary, two tenants: 1000 each. t-a's backlog cannot use t-b's share.
+    jobs = tuple(Job(f"a{index}", "t-a", 1, deadline=90, tokens=1000) for index in range(5)) + (
+        Job("b0", "t-b", 1, deadline=90, tokens=1000),
+    )
+    placed = {item.job_id: item for item in schedule(jobs, {"t-a": 8, "t-b": 8}, host_cap=8, window=90, provider_tpm={"primary": 2000})}
+    starts_a = sorted(placed[f"a{index}"].start for index in range(5))
+    assert starts_a == [0, 1, 2, 3, 4]
+    assert placed["b0"].start == 0
+
+
+def test_a_tenant_short_of_tokens_waits_and_escalates_only_at_its_deadline():
+    jobs = (Job("a0", "t-a", 1, deadline=90, tokens=1000), Job("a1", "t-a", 1, deadline=1, tokens=1000))
+    placed = {item.job_id: item for item in schedule(jobs, {"t-a": 8}, host_cap=8, window=90, provider_tpm={"primary": 1000})}
+    assert placed["a1"].start == 0
+    assert placed["a0"].start == 1

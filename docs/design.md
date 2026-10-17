@@ -22,10 +22,10 @@ The drill replays recorded calls, injects an error and a rate limit, marks both 
 
 Agents give a deadline, not a start minute, so 200 briefs due at 07:30 spread across 90 minutes instead of all firing at 06:00. Dispatch is earliest deadline first, behind these limits:
 
-- **Provider:** a cap on concurrent runs per provider. When full, a run waits or switches model. A self-hosted model is one more provider, sized by its batch slots.
+- **Provider:** concurrent runs and tokens per minute. When full, a run waits or switches model. A self-hosted model is one more provider, sized by its batch slots.
 - **Tenant:** each tenant has a concurrency limit, and it says how many of its runs happen at once.
 - **Host:** 8 containers, each with 0.5 CPU and 512 MB of RAM.
-- **Rate limits:** runs start on the API. On a 429 the agent falls back to the next model and logs `provider_fallback`. 429 backoff, a per-tenant quota split and batching are designed, not built.
+- **Rate limits:** runs start on the API. On a 429 the agent retries with exponential backoff and jitter; if throttling continues, it falls back to the local model. Each provider's token quota is split across tenants, and runs are capped at each provider's concurrency.
 
 If the scheduler predicts a missed deadline, it escalates to a person.
 
@@ -33,7 +33,7 @@ If the scheduler predicts a missed deadline, it escalates to a person.
 
 Each run gets a new container: a regular user on a read-only filesystem, a 64 MB scratch disk, no extra capabilities, no privilege escalation, the default seccomp profile, and process, CPU and memory limits. `py.exec` runs as a subprocess in the same container.
 
-The container can talk to the proxy and nothing else. Its run token names the run but is not a credential. The proxy ties the token to the container's IP, reads the tenant and allowlist from it, and adds the real provider key on the way out. Another tenant's mail returns `foreign_id` and logs `policy_denied`; `/etc/shadow` and the internet fail in the container. The `CONNECT` and loopback check is tested, not a live route.
+The container can talk to the proxy and nothing else. Its run token names the run but is not a credential. The proxy ties the token to the container's IP, reads the tenant and allowlist from it, and adds the real provider key on the way out. Another tenant's mail, a `CONNECT` tunnel and a call to `127.0.0.1:18894` through the proxy each return a denial and log `policy_denied`.
 
 ## Failure and resume
 
@@ -41,7 +41,7 @@ Each step is keyed by `run_id`, `step_no` and a hash of messages and tool argume
 
 Every failure ends in one of three logged outcomes:
 
-1. **Auto-resume.** A killed worker resumes in a new container with the same `run_id` once the lease frees, skipping completed steps. Tool errors retry 3 times, then go to the model. A hang is cancelled and retried once. Three provider errors, or a 429, switch to the next model and log `provider_fallback`. Sandbox denials are logged and the run continues.
+1. **Auto-resume.** A killed worker resumes in a new container with the same `run_id` once the lease frees, skipping completed steps. Tool errors retry 3 times, then go to the model. A hang is cancelled and retried once. Three provider errors, or throttling past backoff, switch to the next model and log `provider_fallback`. Sandbox denials are logged and the run continues.
 2. **Rerun with logged cost.** A step that died while `STARTED` reruns and logs `cost_uncertain`, since the provider may have charged already.
 3. **Hand to a person.** A loop (the same call 3 times) stops as `STOPPED_LOOP`; a call that would pass a limit is skipped and the run stops as `STOPPED_BUDGET`. Both save progress first. A person also takes over after 3 resumes, when every model is down, when a retry fails again, on a third sandbox denial, or before a missed deadline.
 
@@ -53,11 +53,11 @@ Every failure ends in one of three logged outcomes:
 
 **Evals.** Each agent has a baseline of 20 or more recorded cases with expected outputs, including the injection email; the synthetic mailbox (about 30 emails across four tenants) is the brief agent's workload, not the baseline. A temperature-0 judge model scores each case 1 to 5. Hard checks must pass: tenant-only data, no unflagged external draft, matching spreadsheet figures. A new prompt or model gets a new config hash and reruns the same baseline, keeping scores comparable. `evals run` writes an `eval_record` only if hard checks pass and the mean drops 0.3 or less; the first record uses hard checks only.
 
-**Memory.** Memory is Postgres rows keyed to a tenant and an agent: a cursor marking the last item processed and facts saved with `memory.write`. Row-level security scopes every read and write to the run token's tenant. They are not yet loaded into the prompt. The cursor moves only on `SUCCEEDED`, but `mail.list` does not read it yet.
+**Memory.** Memory is Postgres rows keyed to a tenant and an agent: a cursor marking the last item processed and facts saved with `memory.write`. Row-level security scopes every read and write to the run token's tenant. Each run loads the facts into the prompt as quoted data, and `mail.list` starts after the cursor. The cursor moves only on `SUCCEEDED`, so a crashed run retries from the same position.
 
 **Panel** (design only). Three models answer blind, then challenge each other's claims with evidence over two rounds. The parent returns agreed claims, contested ones with how each was settled, and any minority view kept, because agreement is not proof.
 
-**Drafts.** Agents write drafts but cannot send. Sending is a separate action that needs an approver in the same tenant; it sets `Message-ID` from the draft ID and moves the outbox from `SENDING` to `SENT`, and after a crash it checks by that ID, so a replay never sends twice. A draft that goes outside the tenant's domains or attaches documents is flagged and needs its own approval. Mail enters the prompt as quoted data, not instructions, so a malicious email gets no further than a flagged draft.
+**Drafts.** Agents write drafts but cannot send. Sending is a separate action that needs an approver in the same tenant; it sets `Message-ID` from the draft ID and moves the outbox from `SENDING` to `SENT`, and after a crash it checks by that ID, so a replay never sends twice. A draft that goes outside the tenant's domains or attaches documents is flagged and needs its own approval. Mail and memory enter the prompt as quoted data, not instructions, so a malicious email gets no further than a flagged draft.
 
 ## Not building
 

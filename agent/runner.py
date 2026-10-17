@@ -1,11 +1,40 @@
+import threading
 import time
+from contextlib import contextmanager
 
-from agent.loop import after_hang, after_provider_pressure, after_tool_error, is_loop, stop_with_progress
+import random
+
+from agent.loop import after_hang, after_provider_pressure, after_tool_error, backoff_delay, is_loop, stop_with_progress
 from agent.prompts import brief_prompt, doc_prompt, external_recipient
 from agent.tools import py_exec, sheet_total
 from proxy.providers import OUTPUT_CAP, prompt_tokens
 from runtime.citations import cites_line
 from runtime.config import AgentConfig
+
+
+NO_NEW_MAIL = "no new mail"
+HEARTBEAT_S = 5.0
+
+
+@contextmanager
+def local_work(client, interval: float = HEARTBEAT_S):
+    """Heartbeat to the proxy every `interval` seconds while the agent works locally, so the lease renews."""
+    stop = threading.Event()
+
+    def beat():
+        while not stop.wait(interval):
+            try:
+                client.heartbeat()
+            except Exception:  # a missed beat only shortens the lease; the next one retries
+                pass
+
+    thread = threading.Thread(target=beat, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join()
 
 
 class LimitReached(Exception):
@@ -23,7 +52,8 @@ class Guarded:
 
     backoff_s = 0.5
 
-    def __init__(self, client, config: AgentConfig, clock, sleep):
+    def __init__(self, client, config: AgentConfig, clock, sleep, uniform=random.uniform):
+        self._uniform = uniform
         self._client = client
         self._limits = config.limits
         self._clock = clock
@@ -33,6 +63,19 @@ class Guarded:
         self.tokens = 0
         self.pause_after = getattr(client, "pause_after", None)
         self.pause_after_seconds = getattr(client, "pause_after_seconds", 0)
+
+    def sleep(self, seconds: float) -> None:
+        self._sleep(seconds)
+
+    def uniform(self, low: float, high: float) -> float:
+        return self._uniform(low, high)
+
+    def heartbeat(self) -> dict:
+        beat = getattr(self._client, "heartbeat", None)
+        return beat() if beat else {}
+
+    def forward(self, method: str, target: str) -> dict:
+        return self._client.forward(method, target)
 
     def state(self, state: str, artifact: str) -> dict:
         return self._client.state(state, artifact)
@@ -76,20 +119,31 @@ class Guarded:
 
 
 def execute(
-    client, config: AgentConfig, run_id: str, scenario: str = "brief", executor=None, clock=time.monotonic, sleep=time.sleep
+    client, config: AgentConfig, run_id: str, scenario: str = "brief", executor=None, clock=time.monotonic, sleep=time.sleep, uniform=random.uniform,
+    heartbeat_s: float = HEARTBEAT_S,
 ) -> dict:
     """executor runs code locally, in whatever container this process is in. Tests pass a fake.
 
     A limit stop is STOPPED_BUDGET with artifact "saved progress: <limit>" and a limit_reached event naming it.
     """
-    guarded = Guarded(client, config, clock, sleep)
+    guarded = Guarded(client, config, clock, sleep, uniform)
     try:
-        return _dispatch(guarded, config, run_id, scenario, executor or py_exec)
+        return _dispatch(guarded, config, run_id, scenario, _beating(guarded, executor or py_exec, heartbeat_s))
     except LimitReached as exc:
         kind, artifact = stop_with_progress("STOPPED_BUDGET", f"saved progress: {exc.limit}")
         client.event("limit_reached", {"limit": exc.limit})
         stored = client.state(kind, artifact)
         return {"state": stored.get("state", kind), "artifact": artifact}
+
+
+def _beating(client, executor, interval: float):
+    """Every local executor call (py.exec, the sheet program) runs with the heartbeat on."""
+
+    def run(*args, **kwargs):
+        with local_work(client, interval):
+            return executor(*args, **kwargs)
+
+    return run
 
 
 def _dispatch(client, config: AgentConfig, run_id: str, scenario: str, executor) -> dict:
@@ -112,10 +166,14 @@ def _dispatch(client, config: AgentConfig, run_id: str, scenario: str, executor)
 def _brief(client, config: AgentConfig, run_id: str) -> dict:
     listed = client.tool("mail.list", {}, 1)
     messages = listed.get("messages") or []
+    if not messages and "messages" in listed:
+        # mail.list starts after the stored cursor; nothing new means nothing to brief. The proxy checks this.
+        stored = client.state("SUCCEEDED", NO_NEW_MAIL)
+        return {"state": stored.get("state"), "artifact": NO_NEW_MAIL}
     client.tool("mail.read", {"ids": [message["id"] for message in messages]}, 2)
     if getattr(client, "pause_after", None) == 2:
         time.sleep(client.pause_after_seconds)
-    text, model = _model(client, config, brief_prompt(config.instructions, messages), 3)
+    text, model = _model(client, config, brief_prompt(config.instructions, messages, listed.get("facts")), 3)
     if text is None:
         return {"state": model, "artifact": ""}
     recipient = external_recipient(messages, listed.get("domains") or [])
@@ -153,7 +211,7 @@ def _model(client, config: AgentConfig, messages, step_no: int) -> tuple[str | N
     """Returns (text, model). text is None when the run already stopped; model then holds the stored state."""
     model = config.models[0]
     errors = 0
-    throttled = False
+    throttles = 0
     while True:
         result = client.complete(messages, model, step_no)
         status = result.get("status", 200)
@@ -164,11 +222,17 @@ def _model(client, config: AgentConfig, messages, step_no: int) -> tuple[str | N
         if status in (503, 429):
             if status == 503:
                 errors += 1
-            throttled = throttled or status == 429
-            action, nxt = after_provider_pressure(errors, throttled, config.models, model)
-            if action == "fallback":
+            else:
+                throttles += 1
+            action, nxt = after_provider_pressure(errors, throttles if status == 429 else 0, config.models, model)
+            if action == "backoff":
+                delay = backoff_delay(throttles, client.uniform)
+                client.event("provider_backoff", {"model": model, "attempt": throttles, "delay_s": round(delay, 3)})
+                client.sleep(delay)
+            elif action == "fallback":
                 client.event("provider_fallback", {"model": nxt, "simulated": bool(result.get("simulated"))})
                 model = nxt
+                errors = throttles = 0
             elif action == "escalate":
                 client.state("ESCALATED", "provider")
                 return None, "ESCALATED"
@@ -183,7 +247,8 @@ def _model(client, config: AgentConfig, messages, step_no: int) -> tuple[str | N
 
 
 def _escape(client, run_id: str, executor) -> dict:
-    """Two local OS probes through the executor, then one foreign id through the proxy."""
+    """Two local OS probes through the executor, one foreign id through the proxy, then the proxy used as a
+    forward proxy (CONNECT to the internet, GET to loopback). The proxy refuses and logs both."""
     probes = (
         "print(open('/etc/shadow').read())",
         "import urllib.request; urllib.request.urlopen('http://example.com', timeout=3)",
@@ -197,6 +262,12 @@ def _escape(client, run_id: str, executor) -> dict:
             outcomes.append(f"{type(exc).__name__}: {str(exc).strip().splitlines()[-1] if str(exc).strip() else ''}")
     foreign = client.tool("mail.read", {"ids": ["m-b-1"]}, 1)
     outcomes.append(f"mail.read m-b-1: {foreign.get('reason') or 'returned'}")
+    for method, target in (("CONNECT", "example.com:443"), ("GET", "http://127.0.0.1:18894/")):
+        try:
+            answer = client.forward(method, target)
+            outcomes.append(f"{method} {target}: {answer.get('status')} {answer.get('reason') or ''}".strip())
+        except Exception as exc:
+            outcomes.append(f"{method} {target}: {type(exc).__name__}")
     failures = sum(1 for item in outcomes[:2] if item != "ran") + (1 if foreign.get("denied") else 0)
     state = "ESCALATED" if failures >= 3 else "FAILED"
     stored = client.state(state, f"failures {failures}")

@@ -6,7 +6,9 @@ from decimal import Decimal
 
 import psycopg
 
-from proxy.app import finish_step, resolve
+from urllib.parse import urlsplit
+
+from proxy.app import Call, decide, finish_step, resolve, write_denial
 from runtime.runs import LEASE_SECONDS
 from proxy.gate import Bound, Finished, admit_tool, claim_step, finish_state, load_bound, write_event
 from proxy.providers import Cassette, KNOWN_MODELS, Provider, ReplayMiss, UnknownPrice, live_estimate, merge_trace_headers, recorded_cost, step_digest
@@ -24,7 +26,10 @@ class ProxyContext:
     heartbeat_s: float = LEASE_SECONDS / 3
 
 
-def dispatch(ctx: ProxyContext, method: str, path: str, raw: bytes, source_ip: str) -> tuple[int, dict]:
+def dispatch(ctx: ProxyContext, method: str, path: str, raw: bytes, source_ip: str, headers: dict | None = None) -> tuple[int, dict]:
+    if method == "CONNECT" or path.startswith(("http://", "https://")):
+        with psycopg.connect(ctx.database_url, autocommit=True) as conn:
+            return forward(ctx, conn, method, path, (headers or {}).get("X-Run-Token", ""), source_ip)
     if method == "GET" and path == "/health":
         return 200, {"ok": True, "name": ctx.name, "mode": ctx.mode}
     if method == "GET" and path == "/whoami":
@@ -47,6 +52,8 @@ def dispatch(ctx: ProxyContext, method: str, path: str, raw: bytes, source_ip: s
             return set_state(ctx, conn, payload, source_ip)
         if path == "/v1/event":
             return add_event(ctx, conn, payload, source_ip)
+        if path == "/v1/heartbeat":
+            return heartbeat_route(ctx, conn, payload, source_ip)
     return 404, {"error": "not_found"}
 
 
@@ -158,6 +165,36 @@ def add_event(ctx: ProxyContext, conn, payload: dict, source_ip: str) -> tuple[i
         return 403, {"error": "token"}
     write_event(conn, bound.tenant_id, bound.run_id, payload["event"], payload.get("detail") or {})
     _note(ctx, f"event trace {bound.tenant_id}.{bound.run_id} {payload['event']}")
+    return 200, {"ok": True}
+
+
+def forward(ctx: ProxyContext, conn, method: str, target: str, token: str, source_ip: str) -> tuple[int, dict]:
+    """Forward-proxy requests (CONNECT tunnels, absolute URLs). Refused and logged; the proxy never forwards them."""
+    bound = _bound(conn, {"token": token}, source_ip)
+    if bound is None:
+        _note(ctx, f"forward 403 token {method}")
+        return 403, {"error": "token"}
+    if method == "CONNECT":
+        host, _sep, port = target.rpartition(":")
+        path = ""
+    else:
+        parsed = urlsplit(target)
+        host, port, path = parsed.hostname or "", parsed.port or (443 if parsed.scheme == "https" else 80), parsed.path
+    decision = decide(Call(
+        method, host, int(port or 0), path, bound.tenant_id, source_ip, source_ip, frozenset(),
+        Decimal(0), Decimal(0), bound.policy.max_usd,
+    ))
+    reason = decision.reason if not decision.allow else "forward_not_supported"
+    write_denial(conn, bound.tenant_id, reason, {"run_id": bound.run_id, "method": method, "target": target})
+    write_event(conn, bound.tenant_id, bound.run_id, "policy_denied", {"method": method, "reason": reason})
+    _note(ctx, f"forward 403 trace {bound.tenant_id}.{bound.run_id} {method} {target} {reason}")
+    return 403, {"denied": True, "reason": reason}
+
+
+def heartbeat_route(ctx: ProxyContext, conn, payload: dict, source_ip: str) -> tuple[int, dict]:
+    """The agent's heartbeat during long local work. Resolving the token renews the lease."""
+    if _bound(conn, payload, source_ip) is None:
+        return 403, {"error": "token"}
     return 200, {"ok": True}
 
 

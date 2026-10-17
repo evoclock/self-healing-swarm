@@ -56,6 +56,7 @@ def main() -> int:
         ("loop", scenario_loop),
         ("document", scenario_document),
         ("tool_error", scenario_tool_error),
+        ("memory", scenario_memory),
         ("dispatch", scenario_dispatch),
         ("eval_gate", scenario_eval),
         ("empty", scenario_empty),
@@ -88,6 +89,7 @@ def scenario_kill() -> tuple[bool, str]:
     run_id = "drill-kill"
     token = "drill-kill-token"
     conn = connect(os.environ["DATABASE_URL"])
+    clear_memory(conn, "t-a", "daily-brief")
     open_run(conn, "t-a", run_id, "daily-brief", token, "10.255.255.1", _policy(BRIEF), BRIEF, "brief")
     first = _start_agent(host_repo, network, token, run_id, BRIEF, "brief", pause=True)
     record_container(conn, "t-a", run_id, first)
@@ -129,8 +131,8 @@ def scenario_kill() -> tuple[bool, str]:
 
 
 def scenario_provider() -> tuple[bool, str]:
-    row, ev, result = _run("drill-provider", "t-a", "daily-brief", BRIEF, "brief", ["error", "429"])
-    ok = row["state"] == "SUCCEEDED" and "provider_fallback" in ev
+    row, ev, result = _run("drill-provider", "t-a", "daily-brief", BRIEF, "brief", ["error", "429", "429", "429", "429"])
+    ok = row["state"] == "SUCCEEDED" and ev.count("provider_backoff") == 3 and "provider_fallback" in ev
     return ok, f"run_id drill-provider state {row['state']}\nevents {ev}\n{result}"
 
 
@@ -198,13 +200,19 @@ def scenario_escape() -> tuple[bool, str]:
     # 3. The agent's own escape script, in a locked container. One proxy-written foreign_id step is required.
     # Older drills ran drill-escape as t-b. RLS hides that row from a t-a reset, so clear it under t-b.
     reset_run(conn, "t-b", "drill-escape")
+    _clear_audit(conn, "t-a", "drill-escape")
     row, logs = run_locked("drill-escape", "t-a", "daily-brief", BRIEF, "escape", _policy(BRIEF))
     denied = foreign_denials(conn, "t-a", "drill-escape")
-    ok = proxy_ok and probes_ok and len(denied) == 1
+    # 4. The agent used the proxy as a forward proxy from inside its container. The live route refused both and
+    # wrote the denials itself.
+    forward = _forward_denials(conn, "t-a", "drill-escape")
+    forward_ok = sorted(forward) == ["connect", "loopback"] and events(conn, "t-a", "drill-escape").count("policy_denied") >= 2
+    ok = proxy_ok and probes_ok and len(denied) == 1 and forward_ok
     detail = (
         f"proxy py.exec reason {refused.get('reason')} marker {marker.exists()}\n"
         + "\n".join(probe_out)
         + f"\nrun_id drill-escape agent state {row['state']} (reported) foreign_id steps {len(denied)}"
+        + f"\nforward proxy denials {sorted(forward)}"
     )
     return ok, detail if ok else detail + "\n" + logs[-800:]
 
@@ -277,6 +285,8 @@ def scenario_dispatch() -> tuple[bool, str]:
         tenant, agent_id, path, _job = plan[job.job_id]
         escalate_run(conn, tenant, job.job_id, agent_id, path, _policy(path))
 
+    clear_memory(conn, "t-a", "daily-brief")
+    clear_memory(conn, "t-b", "doc-analyst")
     dispatch_once([item[3] for item in plan.values()], {"t-a": 1, "t-b": 1, "t-c": 1}, launch, escalate)
     try:
         for tenant, run_id, _cid in started:
@@ -293,7 +303,19 @@ def scenario_dispatch() -> tuple[bool, str]:
         and states["drill-dispatch-late"] == "ESCALATED"
         and "deadline_escalated" in events(conn, "t-c", "drill-dispatch-late")
     )
-    return ok, f"started in order {order}\nstates {states}"
+    # Per-tenant token quota inside the provider limit, same dispatch_once: 3000 tokens/min split over two
+    # tenants is 1500 each, so t-a's second 1000-token job waits a minute while t-b's starts now.
+    quota_jobs = [
+        Job("q-a1", "t-a", 1, deadline=30, tokens=1000),
+        Job("q-a2", "t-a", 1, deadline=30, tokens=1000),
+        Job("q-b1", "t-b", 1, deadline=30, tokens=1000),
+    ]
+    quota_started = []
+    placements = dispatch_once(quota_jobs, {"t-a": 2, "t-b": 2}, lambda job: quota_started.append(job.job_id), lambda job: None, provider_tpm={"primary": 3000})
+    deferred = {p.job_id: p.start for p in placements if p.start > 0}
+    quota_ok = sorted(quota_started) == ["q-a1", "q-b1"] and deferred == {"q-a2": 1}
+    ok = ok and quota_ok
+    return ok, f"started in order {order}\nstates {states}\ntoken quota started {sorted(quota_started)} deferred {deferred}"
 
 
 def scenario_eval() -> tuple[bool, str]:
@@ -367,12 +389,73 @@ def scenario_send() -> tuple[bool, str]:
     return ok, f"smtp {len(logged)} first sink {len(first_sink)} second sink {len(second_sink)} message {message}"
 
 
+def scenario_memory() -> tuple[bool, str]:
+    """Two brief runs back to back. The second mail.list starts at the stored cursor, so it sees no mail the
+    first run processed, and the run ends 'no new mail' (the proxy checks there really is none)."""
+    first, _ev1, _r1 = _run("drill-memory-1", "t-a", "daily-brief", BRIEF, "brief", [])
+    reset_run(connect(os.environ["DATABASE_URL"]), "t-a", "drill-memory-2")
+    row, logs = run_locked("drill-memory-2", "t-a", "daily-brief", BRIEF, "brief", _policy(BRIEF), keep_memory=True)
+    conn = connect(os.environ["DATABASE_URL"])
+    conn.execute("SELECT set_config('app.tenant_id', 't-a', false)")
+    seen_first = _listed_ids(conn, "drill-memory-1")
+    seen_second = _listed_ids(conn, "drill-memory-2")
+    ok = (
+        first["state"] == "SUCCEEDED"
+        and len(seen_first) > 0
+        and not set(seen_first) & set(seen_second)
+        and row["state"] == "SUCCEEDED"
+        and (row["artifact"] or "").strip() == "no new mail"
+    )
+    return ok, (
+        f"run_id drill-memory-1 state {first['state']} listed {seen_first}\n"
+        f"run_id drill-memory-2 state {row['state']} listed {seen_second} artifact {row['artifact']!r}"
+    ) + ("" if ok else "\n" + logs[-800:])
+
+
+def _listed_ids(conn, run_id: str) -> list[str]:
+    row = conn.execute(
+        """
+        SELECT response FROM steps WHERE run_id = %s AND step_no = 1 AND status = 'COMPLETED'
+        ORDER BY step_no LIMIT 1
+        """,
+        (run_id,),
+    ).fetchone()
+    if row is None:
+        return []
+    response = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+    return [message["id"] for message in response.get("messages") or []]
+
+
+def clear_memory(conn, tenant: str, agent_id: str) -> None:
+    """Drill runs share the seeded mail. Each starts without a cursor or facts unless it asks to keep them."""
+    conn.execute("SELECT set_config('app.tenant_id', %s, false)", (tenant,))
+    conn.execute("DELETE FROM memory WHERE tenant_id = %s AND agent_id = %s", (tenant, agent_id))
+
+
+def _forward_denials(conn, tenant: str, run_id: str) -> list[str]:
+    conn.execute("SELECT set_config('app.tenant_id', %s, false)", (tenant,))
+    rows = conn.execute(
+        "SELECT detail->>'reason' FROM audit_log WHERE detail->>'run_id' = %s AND detail ? 'target'",
+        (run_id,),
+    ).fetchall()
+    return [row[0] for row in rows]
+
+
 def run_locked(
-    run_id: str, tenant: str, agent_id: str, config_path: str, scenario: str, policy: RunPolicy, faults: list | None = None
+    run_id: str,
+    tenant: str,
+    agent_id: str,
+    config_path: str,
+    scenario: str,
+    policy: RunPolicy,
+    faults: list | None = None,
+    keep_memory: bool = False,
 ) -> tuple[dict, str]:
     """open_run, start a fresh locked agent container, bind its IP, wait for a terminal state."""
     network = os.environ["AGENT_NETWORK"]
     conn = connect(os.environ["DATABASE_URL"])
+    if not keep_memory:
+        clear_memory(conn, tenant, agent_id)
     token = f"token-{run_id}"
     open_run(conn, tenant, run_id, agent_id, token, "10.255.255.1", policy, config_path, scenario)
     ProxyClient(os.environ["PROXY_A_URL"], "").faults(list(faults or []))

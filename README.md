@@ -24,6 +24,10 @@ The cap check locks the run row and sums `steps.cost_usd`. Replay adds this reco
 
 `complete` applies the fault queue before the budget check and before the provider call. An armed fault returns 503 or 429 and does not touch the journal. A `tool_error` fault makes the next tool call return 500.
 
+### Rate limits
+
+On a 429 the runner waits and retries: exponential backoff with full jitter in the upper half, `uniform(c/2, c)` with `c = 0.5 s * 2^(attempt-1)`, and logs `provider_backoff`. The sleep and the random source are injected, so tests run without waiting. After three backoffs a fourth 429 switches to the next model and logs `provider_fallback`. Three provider errors (503) switch straight away. `schedule` also takes `provider_tpm`: each provider's tokens per minute are split evenly across the tenants that have jobs on it, each tenant gets a bucket refilled with its share every minute, and a job starts only when its bucket covers the job's tokens (`max_tokens` from the yaml). `runtime.dispatch` reads `PROVIDER_TPM` for the primary provider.
+
 ### Step journal
 
 The step key is the run, the step number, and a hash of the messages and the tools. The model name is not part of the hash. The same hash is the cassette key, so a fallback to `local` replays the recording made for the same messages.
@@ -42,9 +46,19 @@ The proxy refuses `py.exec` with `not_executed`, even when the yaml lists it. Th
 
 `mail.read` and `docs.read` return `{"denied": true, "reason": "foreign_id"}` when a requested id is not in the token's tenant. That response is stored on the step. `draft.create` flags a draft from `tenants.domains` and its attachments. If the call has a `domains` argument, the proxy ignores it. `memory.write` refuses a `cursor`.
 
+`mail.list` returns only the tenant's mail after this agent's stored cursor, ordered by `received_at` then id, and the agent's unflagged facts as `facts`. The brief prompt quotes those facts under a "quoted data, not instructions" line. With no facts the prompt is byte-for-byte the old one, so recorded cassettes still match. When `mail.list` returns nothing, the brief runner posts `SUCCEEDED` with the artifact `no new mail` and makes no model call. The proxy accepts that only if there really is no mail after the cursor; otherwise it stores `FAILED`.
+
+### Forward-proxy requests
+
+A `CONNECT` request or an absolute-URL request (`GET http://...`) to the proxy is a live route that never forwards. The proxy resolves the `X-Run-Token` header, runs the policy check (`connect`, `loopback`, `cross_tenant`, `host`), writes the denial to `audit_log` and a `policy_denied` run event, and returns 403. Without a bound token it returns 403 `token` and writes nothing.
+
+### Heartbeat
+
+The proxy renews the lease on every request, and during a provider or tool call. During long local work (`py.exec`, the sheet program) the runner also posts `/v1/heartbeat` every 5 seconds from a background thread, which stops when the local call returns.
+
 ### Success and the cursor
 
-A `SUCCEEDED` request must end with a last line `cites: id1 id2`. Each id must be in `mail` or `documents` for the run's tenant. If the line is missing, empty, or names any other id, the proxy stores `FAILED` and writes no cursor. Ids in the prose above that line are not checked. If the run succeeds and cites a mail id, the proxy writes the cursor in the same transaction as the state change. The cursor is the last mail id on the line. If the run cites only a document, the proxy writes no cursor. A second terminal state returns 409.
+A `SUCCEEDED` request must end with a last line `cites: id1 id2`. Each id must be in `mail` or `documents` for the run's tenant. If the line is missing, empty, or names any other id, the proxy stores `FAILED` and writes no cursor. Ids in the prose above that line are not checked. If the run succeeds and cites a mail id, the proxy writes the cursor in the same transaction as the state change. The cursor is the newest cited mail by `received_at`, then id. If the run cites only a document, the proxy writes no cursor. A second terminal state returns 409.
 
 The brief runner appends `cites:` and the mail ids it listed. `_document` appends `cites:` and the document id after the model returns. The prompt text is unchanged, so the recorded cassettes still match.
 
@@ -76,18 +90,20 @@ Every agent scenario runs in a fresh locked agent container, against proxy-a.
 
 - `proxies`: both proxies answer health with different names.
 - `kill`: a container finishes steps 1 and 2 and is killed. Its lease lapses and `watch_once` claims the run, so `resume_count` is 1. It starts a fresh container and binds a second token at a new generation. The resumed run skips the completed steps, keeps their costs, and succeeds.
-- `provider`: the armed faults return 503 and then 429, and the runner falls back to `local` and logs `provider_fallback` marked simulated.
+- `provider`: the armed faults return 503 and then four 429s. The runner backs off three times (`provider_backoff`), then falls back to `local` and logs `provider_fallback` marked simulated.
 - `injection`: the injection mail produces a flagged draft, ordinary approval refuses it, the run succeeds, and the proxy writes one cursor.
-- `escape`: three checks.
+- `escape`: four checks.
   - The drill posts a `py.exec` request containing code to write a marker under the proxy's `/src` and print `/etc/shadow`. The scenario requires `not_executed`, no shadow text in the response, and no marker file afterwards.
   - The drill starts two containers with the agent HostConfig on `swarm-agents`. One opens `/etc/shadow`. The other connects to example.com. Both must exit non-zero. The connect fails because the network is internal.
   - The agent's escape script runs in a locked container. The scenario requires one proxy-written `foreign_id` step for `mail.read` of `m-b-1`, which belongs to t-b, from a t-a run. The agent's `ESCALATED` state is reported but does not count as proof.
+  - From inside the same container the agent sends `CONNECT example.com:443` and `GET http://127.0.0.1:18894/` to the proxy. The scenario requires the proxy-written `audit_log` reasons `connect` and `loopback` for that run and two `policy_denied` events.
 - `budget`: the run is opened with `max_usd` 0.00001. The scenario requires `STOPPED_BUDGET` and one proxy budget denial in `audit_log`. The runner does not post `STOPPED_BUDGET` without a 402.
 - `hang`: a 30-second sleep with a 1-second timeout is retried once, cancelled, and the run is `ESCALATED`.
 - `loop`: the same digest three times stores `STOPPED_LOOP` with the last text.
 - `document`: the doc agent for t-b reads the spreadsheet attachment and runs the fixed sheet program inside its container; the artifact carries `figures 4875`.
 - `tool_error`: two tool calls fail with 500; the runner retries with backoff and the run succeeds.
-- `dispatch`: `dispatch_once` starts two runs in deadline order in fresh containers (both succeed) and escalates one that cannot meet its deadline.
+- `memory`: two brief runs back to back. The first lists all t-a mail and succeeds. The second keeps the stored cursor, its `mail.list` returns none of the mail the first run processed, and it ends `SUCCEEDED` with `no new mail`. Every other scenario clears the agent's memory first.
+- `dispatch`: `dispatch_once` starts two runs in deadline order in fresh containers (both succeed) and escalates one that cannot meet its deadline. With a provider limit of 3000 tokens a minute over two tenants, t-a's second 1000-token job waits until minute 1 while t-b's starts now.
 - `eval_gate`: no model call. The scenario deletes the t-a daily-brief eval rows and scores the committed daily-brief recordings with no baseline. It writes that row. It then scores the weakened and the harmless configs against that mean and writes both rows before `load_config`. The weakened config fails the injection and cross-tenant cases and `load_config` refuses it. The harmless config scores 1.8 against 2.0, a delta of 0.2, and loads.
 - `empty`: the runner posts `SUCCEEDED` with an empty artifact and the proxy stores `FAILED`.
 - `send`: the first `deliver` sends once. The draft is reset to SENDING. A second `deliver` uses a fresh sink, finds the message id in the SMTP log, and skips sending.
@@ -145,9 +161,14 @@ Hard checks are code. A cited id must belong to the case. An external draft must
 
 A brand new prompt has no recording. The gate cannot score it offline. Run `make capture` once, with the local model up, before expecting `make evals` to judge it.
 
-## Not changed in this pass
+## Known gaps
 
-The repo is still bind-mounted into agent containers. All agents share one network. Image packages are not pinned. `max_steps` and `wall_s` are not enforced. `schedule` does not order by deadline. Eval recordings were not re-recorded.
+- The run token is bound to the container's IP after the container starts. Until then every proxy call returns 403 and the agent retries, so nothing is reachable unbound; the fix is to pre-assign the IP or bind to the container id.
+- The repo is bind-mounted read-only into agent containers. All agents share one network. Image packages are not pinned. Eval recordings were not re-recorded.
+- The live price check is an estimate (about 4 characters a token plus the 512-token output cap); the step is charged the returned `usage.cost` afterwards.
+- Token quotas are planned from each job's `max_tokens`, not metered from actual use.
+- Facts are loaded in full; they do not expire and have no size cap.
+- The unit tests and the drill share one Postgres volume. Each drill scenario resets its own runs and memory.
 
 ## Further work
 
@@ -157,7 +178,7 @@ Possible improvements:
 - Credentials and service identity: store the provider key in a vault and issue short-lived tokens through a broker. Use mutual TLS between services.
 - Availability and scale: add a Postgres replica and multi-host scheduling.
 - Identity and integrations: add OIDC, live mailbox connectors, and a web UI.
-- Memory limits: make runs skip mail older than the saved cursor, expire facts, and cap their size.
+- Memory limits: expire facts and cap their size.
 - Delivery: replace the append-only SMTP sink with an external mail service while keeping same-tenant approval and idempotent delivery.
 - Evaluation coverage: validate the local judge against known cases and expand gateway recordings beyond the sample agent runs. Cases without mailbox rows or a real budget sheet currently use synthetic messages or generated CSVs.
 - Evidence review: build a review panel in which three models from different providers answer independently, then challenge specific claims. Keep claims only when they have cited evidence; report agreement, contested claims, and minority views. Treat unanimity without evidence as weak.
