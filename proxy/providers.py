@@ -16,7 +16,7 @@ GATEWAY_MODELS = {
 
 
 # Dollars per token, input or output, keyed by the real model id, for the pre-call estimate of a live call.
-# Set at or above the recorded usage.cost per output token (0.00005844 for 231 output tokens), so it does not undercount.
+# Set at or above the recorded usage.cost per output token (0.00006144 for 246 output tokens), so it does not undercount.
 # (input, output) price per token for each real model id.
 PRICES = {"zai/glm-5.3-flash": (Decimal("0.00000026"), Decimal("0.00000026")), "GLM-5.3-Flash-EXL3-TF-FNC7": (Decimal(0), Decimal(0))}
 PRICE_PER_TOKEN = {model: max(prices) for model, prices in PRICES.items()}

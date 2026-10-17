@@ -118,7 +118,7 @@ Every agent scenario runs in a fresh locked agent container, against proxy-a.
 
 ## Cost per agent per day
 
-From recorded runs (`docs/cost.md`): the daily brief is $0.00005844 a run and the document agent $0.00001464 a run. Both are scheduled daily for each of four tenants, so each brief agent costs $0.00005844 a day and each document agent $0.00001464 a day; all eight agents together cost $0.00029232 a day.
+From recorded runs (`docs/cost.md`): the daily brief is $0.00006144 a run and the document agent $0.00001668 a run. Both are scheduled daily for each of four tenants, so each brief agent costs $0.00006144 a day and each document agent $0.00001668 a day; all eight agents together cost $0.00031248 a day.
 
 ## Deliverables
 

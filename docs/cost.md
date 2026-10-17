@@ -4,15 +4,15 @@ Recorded token counts, and where a real dollar amount comes from.
 
 From the recorded runs below. Each agent runs once a day (`schedule.cadence: daily` in every yaml), one daily brief and one document agent per tenant, four tenants.
 
-- Daily brief: $0.00005844 a run × 1 run a day = $0.00005844 per agent per day. Four tenants: 4 × $0.00005844 = $0.00023376 a day.
-- Document agent: $0.00001464 a run × 1 run a day = $0.00001464 per agent per day. Four tenants: 4 × $0.00001464 = $0.00005856 a day.
-- All eight agents: $0.00023376 + $0.00005856 = $0.00029232 a day.
+- Daily brief: $0.00006144 a run × 1 run a day = $0.00006144 per agent per day. Four tenants: 4 × $0.00006144 = $0.00024576 a day.
+- Document agent: $0.00001668 a run × 1 run a day = $0.00001668 per agent per day. Four tenants: 4 × $0.00001668 = $0.00006672 a day.
+- All eight agents: $0.00024576 + $0.00006672 = $0.00031248 a day.
 
 These are one recorded call each (the brief for t-a, the document for t-b). A day with a fallback to `local` costs less (local is $0); a resumed run does not pay again for completed steps.
 
-The daily brief, tenant t-a, eight synthetic emails: 204 input tokens, 231 output tokens, `usage.cost` 0.00005844 dollars.
+The daily brief, tenant t-a, eight synthetic emails: 204 input tokens, 246 output tokens, `usage.cost` 0.00006144 dollars.
 
-The document agent, tenant t-b, spreadsheet doc-b-budget: 84 input tokens, 48 output tokens, `usage.cost` 0.00001464 dollars.
+The document agent, tenant t-b, spreadsheet doc-b-budget: 158 input tokens, 36 output tokens, `usage.cost` 0.00001668 dollars.
 
 The journal stores `usage.cost` from the Gateway response. Replay charges that stored figure.
 
