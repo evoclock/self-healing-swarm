@@ -36,7 +36,12 @@ def create_agent_container(
     env: list[str],
     socket_path: str = "/var/run/docker.sock",
     cmd: list[str] | None = None,
+    ip: str | None = None,
+    tenant: str | None = None,
 ) -> str:
+    """The agent's code is in the image. Only the tenant's own config directory is mounted, read-only.
+    With ip set, the container gets that address on `network` (pre-assigned, so the token is bound before start)."""
+    binds = [f"{host_repo}/agents/{tenant}:/src/agents/{tenant}:ro"] if tenant else []
     body = {
         "Image": "swarm-agent",
         "User": "65534:65534",
@@ -53,9 +58,11 @@ def create_agent_container(
             "NanoCpus": 500000000,
             "PidsLimit": 64,
             "Tmpfs": {"/tmp": "rw,noexec,nosuid,size=64m"},
-            "Binds": [f"{host_repo}:/src:ro"],
+            "Binds": binds,
         },
     }
+    if ip:
+        body["NetworkingConfig"] = {"EndpointsConfig": {network: {"IPAMConfig": {"IPv4Address": ip}}}}
     docker_request("DELETE", f"/containers/{name}?force=1", socket_path=socket_path)
     status, payload = docker_request("POST", f"/containers/create?name={name}", body, socket_path)
     if status not in (200, 201):

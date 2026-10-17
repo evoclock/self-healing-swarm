@@ -191,14 +191,14 @@ def test_own_citation_succeeds_and_the_cursor_is_written_with_the_state(tmp_path
     assert query("t-a", "SELECT body, source_ids FROM memory WHERE run_id = 'gate-cite-own' AND kind = 'cursor'") == [("m-a-2", ["m-a-2"])]
     again, _ = post(context(tmp_path), "/v1/state", {"token": token, "state": "SUCCEEDED", "artifact": "Brief\ncites: m-a-3"})
     assert again == 409
-    assert len(query("t-a", "SELECT id FROM memory WHERE run_id = 'gate-cite-own'")) == 1
+    assert len(query("t-a", "SELECT id FROM memory WHERE run_id = 'gate-cite-own' AND kind = 'cursor'")) == 1
 
 
 def test_document_citation_succeeds_without_a_cursor(tmp_path):
     token = opened("gate-cite-doc", tenant="t-b", agent="doc-analyst", tools={"mail.list", "docs.read"})
     status, body = post(context(tmp_path), "/v1/state", {"token": token, "state": "SUCCEEDED", "artifact": "Total\nfigures 4875\ncites: doc-b-budget"})
     assert (status, body["state"]) == (200, "SUCCEEDED")
-    assert query("t-b", "SELECT id FROM memory WHERE run_id = 'gate-cite-doc'") == []
+    assert query("t-b", "SELECT id FROM memory WHERE run_id = 'gate-cite-doc' AND kind = 'cursor'") == []
 
 
 def test_cursor_memory_write_from_the_agent_is_refused(tmp_path):
@@ -439,11 +439,12 @@ def test_mail_list_starts_after_the_stored_cursor_and_a_second_run_skips_process
     _clear_memory()
 
 
-def test_no_new_mail_fails_when_mail_is_waiting(tmp_path):
+def test_no_new_mail_is_not_accepted_while_mail_is_waiting(tmp_path):
     _clear_memory()
     token = opened("gate-mem-lie")
     status, body = post(context(tmp_path), "/v1/state", {"token": token, "state": "SUCCEEDED", "artifact": "no new mail"})
-    assert (status, body["state"]) == (200, "FAILED")
+    assert (status, body) == (200, {"retry": "new_mail", "state": "RUNNING"})
+    assert query("t-a", "SELECT state FROM runs WHERE id = 'gate-mem-lie'") == [("RUNNING",)]
 
 
 def test_mail_list_returns_unflagged_facts_as_data(tmp_path):
@@ -505,3 +506,116 @@ def test_forward_header_name_is_case_insensitive_and_audited(tmp_path):
     status, body = dispatch(context(tmp_path), "CONNECT", "example.com:443", b"", IP, {"x-run-token": token})
     assert (status, body) == (403, {"denied": True, "reason": "connect"})
     assert query("t-a", "SELECT detail->>'reason' FROM audit_log WHERE detail->>'run_id' = 'gate-forward-lower'") == [("connect",)]
+
+
+def _metered(tmp_path, upstream, tpm=None, rpm=None):
+    return ProxyContext(URL, Cassette(tmp_path), "record", "test", upstream=upstream, provider_tpm=tpm, provider_rpm=rpm)
+
+
+def _clear_quota(tenant="t-a"):
+    with psycopg.connect(URL, autocommit=True) as conn:
+        conn.execute("SELECT set_config('app.tenant_id', %s, false)", (tenant,))
+        conn.execute("DELETE FROM quota_minute WHERE tenant_id = %s", (tenant,))
+
+
+def test_quota_debits_the_real_tokens_and_credits_back_the_reservation(tmp_path):
+    _clear_quota()
+    token = opened("gate-quota-meter")
+    upstream = Upstream()
+    status, _ = post(_metered(tmp_path, upstream, tpm=10_000_000, rpm=1000), "/v1/complete", {
+        "token": token, "messages": [{"role": "user", "content": "meter me"}], "model": "primary", "step_no": 1,
+    })
+    assert status == 200
+    assert query("t-a", "SELECT tokens, requests FROM quota_minute WHERE tenant_id = 't-a' AND provider = 'primary'") == [(20, 1)]
+    _clear_quota()
+
+
+def test_over_the_tenant_share_the_proxy_answers_429_without_calling_the_provider(tmp_path):
+    _clear_quota()
+    token = opened("gate-quota-full")
+    upstream = Upstream()
+    status, body = post(_metered(tmp_path, upstream, tpm=100), "/v1/complete", {
+        "token": token, "messages": [{"role": "user", "content": "x" * 400}], "model": "primary", "step_no": 1,
+    })
+    assert (status, body["error"]) == (429, "quota") and upstream.calls == 0
+    assert query("t-a", "SELECT status, cost_usd FROM steps WHERE run_id = 'gate-quota-full'") == [("FAILED", Decimal(0))]
+    assert ("quota_throttled",) in query("t-a", "SELECT event FROM run_events WHERE run_id = 'gate-quota-full'")
+    _clear_quota()
+
+
+def test_requests_per_minute_are_enforced(tmp_path):
+    _clear_quota()
+    token = opened("gate-quota-rpm")
+    upstream = Upstream()
+    tenants = query("t-a", "SELECT active_tenants()")[0][0]
+    ctx = _metered(tmp_path, upstream, rpm=tenants)  # a share of exactly one request a minute
+    first, _ = post(ctx, "/v1/complete", {"token": token, "messages": [{"role": "user", "content": "a"}], "model": "primary", "step_no": 1})
+    second, body = post(ctx, "/v1/complete", {"token": token, "messages": [{"role": "user", "content": "b"}], "model": "primary", "step_no": 2})
+    assert first == 200 and (second, body["error"]) == (429, "quota") and upstream.calls == 1
+    _clear_quota()
+
+
+def test_mail_arriving_after_an_empty_list_gets_a_retry_not_failed(tmp_path):
+    _clear_memory()
+    first = opened("gate-race-1")
+    ids = [m["id"] for m in _listed(context(tmp_path), first)["messages"]]
+    post(context(tmp_path), "/v1/state", {"token": first, "state": "SUCCEEDED", "artifact": "Brief\ncites: " + " ".join(ids)})
+    second = opened("gate-race-2")
+    assert _listed(context(tmp_path), second)["messages"] == []
+    with psycopg.connect(URL, autocommit=True) as conn:
+        conn.execute("SELECT set_config('app.tenant_id', 't-a', false)")
+        conn.execute("DELETE FROM mail WHERE id = 'm-a-zz-late'")
+        conn.execute(
+            "INSERT INTO mail (id, tenant_id, from_addr, to_addr, subject, body, received_at) "
+            "VALUES ('m-a-zz-late', 't-a', 'x@a.example', 'y@a.example', 'late', 'Late mail.', now() + interval '1 day')"
+        )
+    try:
+        status, body = post(context(tmp_path), "/v1/state", {"token": second, "state": "SUCCEEDED", "artifact": "no new mail"})
+        assert (status, body) == (200, {"retry": "new_mail", "state": "RUNNING"})
+        assert query("t-a", "SELECT state FROM runs WHERE id = 'gate-race-2'") == [("RUNNING",)]
+        assert [m["id"] for m in _listed(context(tmp_path), second, 11)["messages"]] == ["m-a-zz-late"]
+    finally:
+        with psycopg.connect(URL, autocommit=True) as conn:
+            conn.execute("SELECT set_config('app.tenant_id', 't-a', false)")
+            conn.execute("DELETE FROM memory WHERE body = 'm-a-zz-late'")
+            conn.execute("DELETE FROM mail WHERE id = 'm-a-zz-late'")
+        _clear_memory()
+
+
+def test_a_successful_run_leaves_a_short_summary_fact(tmp_path):
+    _clear_memory()
+    token = opened("gate-summary")
+    artifact = '{"cited_ids": ["m-a-1"], "draft": null, "text": "Build on track (m-a-1)."}\ncites: m-a-1'
+    post(context(tmp_path), "/v1/state", {"token": token, "state": "SUCCEEDED", "artifact": artifact})
+    assert _listed(context(tmp_path), opened("gate-summary-next"))["facts"] == ["Run gate-summary: Build on track (m-a-1)."]
+    _clear_memory()
+
+
+def test_facts_expire_and_are_capped_with_the_oldest_evicted(tmp_path):
+    from runtime.memory import MAX_FACTS, memory_write
+
+    _clear_memory()
+    opened("gate-facts-cap")
+    with psycopg.connect(URL, autocommit=True) as conn:
+        conn.execute("SELECT set_config('app.tenant_id', 't-a', false)")
+        for n in range(MAX_FACTS + 3):
+            memory_write(conn, "t-a", "daily-brief", "fact", f"fact number {n:02d}", (), "gate-facts-cap")
+        bodies = [row[0] for row in conn.execute(
+            "SELECT body FROM memory WHERE agent_id = 'daily-brief' AND kind = 'fact' ORDER BY body").fetchall()]
+        assert len(bodies) == MAX_FACTS and "fact number 00" not in bodies and f"fact number {MAX_FACTS + 2:02d}" in bodies
+        conn.execute("UPDATE memory SET expires_at = now() - interval '1 second' WHERE body = 'fact number 05'")
+    token = opened("gate-facts-ttl")
+    assert "fact number 05" not in _listed(context(tmp_path), token)["facts"]
+    _clear_memory()
+
+
+def test_one_fact_over_the_size_cap_is_refused():
+    from runtime.memory import MAX_FACT_CHARS, MemoryRefused, memory_write
+
+    opened("gate-facts-big")
+    with psycopg.connect(URL, autocommit=True) as conn:
+        try:
+            memory_write(conn, "t-a", "daily-brief", "fact", "x" * (MAX_FACT_CHARS + 1), (), "gate-facts-big")
+            raise AssertionError("too large must be refused")
+        except MemoryRefused as exc:
+            assert exc.reason == "too_large"

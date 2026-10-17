@@ -164,17 +164,21 @@ def _dispatch(client, config: AgentConfig, run_id: str, scenario: str, executor)
     return _brief(client, config, run_id)
 
 
-def _brief(client, config: AgentConfig, run_id: str) -> dict:
-    listed = client.tool("mail.list", {}, 1)
+def _brief(client, config: AgentConfig, run_id: str, base: int = 0) -> dict:
+    """base offsets the step numbers for the one re-list after a new_mail retry (steps 11 to 14)."""
+    listed = client.tool("mail.list", {}, base + 1)
     messages = listed.get("messages") or []
     if not messages and "messages" in listed:
         # mail.list starts after the stored cursor; nothing new means nothing to brief. The proxy checks this.
         stored = client.state("SUCCEEDED", NO_NEW_MAIL)
+        if stored.get("retry") == "new_mail" and base == 0:
+            # Mail arrived between the list and the state post. List once more and brief it.
+            return _brief(client, config, run_id, base=10)
         return {"state": stored.get("state"), "artifact": NO_NEW_MAIL}
-    client.tool("mail.read", {"ids": [message["id"] for message in messages]}, 2)
+    client.tool("mail.read", {"ids": [message["id"] for message in messages]}, base + 2)
     if getattr(client, "pause_after", None) == 2:
         time.sleep(client.pause_after_seconds)
-    text, model = _model(client, config, brief_prompt(config.instructions, messages, listed.get("facts")), 3)
+    text, model = _model(client, config, brief_prompt(config.instructions, messages, listed.get("facts")), base + 3)
     if text is None:
         return {"state": model, "artifact": ""}
     recipient = external_recipient(messages, listed.get("domains") or [])
@@ -187,7 +191,7 @@ def _brief(client, config: AgentConfig, run_id: str) -> dict:
                 "subject": "flagged",
                 "body": "Flagged request. Not sent.",
             },
-            4,
+            base + 4,
         )
     cited = tuple(message["id"] for message in messages)
     artifact = (text or "Brief") + "\n" + cites_line(cited)

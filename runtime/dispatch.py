@@ -11,21 +11,21 @@ from datetime import datetime
 from pathlib import Path
 
 from runtime.config import load_agent
-from runtime.docker_api import container_ip, create_agent_container, inspect_container, start_container
+from runtime.launch import agent_env, reap_exited, start_agent
 from runtime.policy import RunPolicy
-from runtime.runs import bind_token, connect, open_run, record_container
+from runtime.runs import connect, open_run
 from runtime.scheduler import Job, schedule, transition
 from runtime.watcher import resume_in_container, watch_once
 
 
-def dispatch_once(jobs, tenant_caps, launch, escalate, host_cap=8, window=90, provider_caps=None, provider_tpm=None):
+def dispatch_once(jobs, tenant_caps, launch, escalate, host_cap=8, window=90, provider_caps=None, provider_tpm=None, provider_rpm=None):
     """Start the jobs schedule() places at minute 0; escalate the ones it predicts will miss their deadline.
 
     provider_tpm splits each provider's tokens per minute across tenants (a token bucket per tenant).
     Jobs placed later are left for a later pass. Returns the placements.
     """
     by_id = {job.job_id: job for job in jobs}
-    placements = schedule(tuple(jobs), tenant_caps, host_cap, window, provider_caps, provider_tpm)
+    placements = schedule(tuple(jobs), tenant_caps, host_cap, window, provider_caps, provider_tpm, provider_rpm)
     for placement in placements:
         if placement.escalated:
             escalate(by_id[placement.job_id])
@@ -35,25 +35,11 @@ def dispatch_once(jobs, tenant_caps, launch, escalate, host_cap=8, window=90, pr
 
 
 def launch_run(conn, tenant, run_id, agent_id, config_path, scenario, policy) -> str:
-    """Open the run, start a fresh locked container, record it, bind the token to its IP."""
-    network = os.environ["AGENT_NETWORK"]
+    """Take an address on the tenant's network, open the run with the token bound to it, then start the container."""
     token = secrets.token_urlsafe(24)
-    open_run(conn, tenant, run_id, agent_id, token, "10.255.255.1", policy, config_path, scenario)
-    env = [
-        "PYTHONPATH=/src",
-        "PYTHONDONTWRITEBYTECODE=1",
-        "HOME=/tmp",
-        f"PROXY_URL={os.environ['PROXY_A_URL']}",
-        f"RUN_TOKEN={token}",
-        f"RUN_ID={run_id}",
-        f"AGENT_CONFIG=/src/{config_path}",
-    ]
-    if scenario:
-        env.append(f"SCENARIO={scenario}")
-    cid = create_agent_container(f"swarm-{run_id}", os.environ["HOST_REPO"], network, env)
-    start_container(cid)
-    record_container(conn, tenant, run_id, cid)
-    bind_token(conn, tenant, run_id, token, container_ip(inspect_container(cid), network))
+    env = agent_env(token, run_id, config_path, scenario)
+    cid, _ip = start_agent(conn, tenant, run_id, token, config_path, env, f"swarm-{run_id}", fresh=True,
+                           agent_id=agent_id, policy=policy, scenario=scenario)
     return cid
 
 
@@ -82,6 +68,7 @@ def jobs_for_today(root: Path, now: datetime):
             max(1, math.ceil(config.limits.wall_s / 60)),
             int((due - now).total_seconds() // 60),
             tokens=config.limits.max_tokens,
+            requests=config.limits.max_steps,
         )
         jobs[run_id] = (job, config, str(path))
     return jobs
@@ -91,6 +78,7 @@ def main() -> int:
     conn = connect(os.environ["DATABASE_URL"])
     caps = {tenant: int(os.environ.get("TENANT_CAP", "2")) for tenant in ("t-a", "t-b", "t-c", "t-d")}
     provider_caps = {"primary": int(os.environ["PROVIDER_CAP"])} if os.environ.get("PROVIDER_CAP") else None
+    rpm = {"primary": int(os.environ["PROVIDER_RPM"])} if os.environ.get("PROVIDER_RPM") else None
     tpm = {"primary": int(os.environ["PROVIDER_TPM"])} if os.environ.get("PROVIDER_TPM") else None
     while True:
         now = datetime.now()
@@ -110,7 +98,8 @@ def main() -> int:
             _job, config, path = planned[job.job_id]
             escalate_run(conn, job.tenant_id, job.job_id, config.id, path, RunPolicy.from_config(config))
 
-        dispatch_once(waiting, caps, launch, escalate, provider_caps=provider_caps, provider_tpm=tpm)
+        dispatch_once(waiting, caps, launch, escalate, provider_caps=provider_caps, provider_tpm=tpm, provider_rpm=rpm)
+        reap_exited(conn)
         for tenant, run_id, state in watch_once(conn, lambda tenant, run_id: resume_in_container(conn, tenant, run_id)):
             print(f"watcher {tenant}.{run_id} {state}", flush=True)
         time.sleep(60)

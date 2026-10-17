@@ -19,6 +19,8 @@ def main() -> None:
         mode=mode,
         name=os.environ.get("PROXY_NAME", "proxy"),
         upstream=upstream,
+        provider_tpm=int(os.environ["PROVIDER_TPM"]) if os.environ.get("PROVIDER_TPM") else None,
+        provider_rpm=int(os.environ["PROVIDER_RPM"]) if os.environ.get("PROVIDER_RPM") else None,
     )
 
     class Handler(BaseHTTPRequestHandler):

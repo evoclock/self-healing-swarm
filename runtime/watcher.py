@@ -8,8 +8,9 @@ import secrets
 import sys
 import time
 
-from runtime.docker_api import container_ip, create_agent_container, inspect_container, kill_container, start_container
-from runtime.runs import LEASE_SECONDS, bind_token, connect, record_container
+from runtime.docker_api import kill_container
+from runtime.launch import agent_env, start_agent, stop_agent
+from runtime.runs import LEASE_SECONDS, connect
 from runtime.scheduler import on_lease_expired, transition
 
 
@@ -65,33 +66,18 @@ def watch_once(conn, resume, only: set[str] | None = None) -> list[tuple[str, st
 
 
 def resume_in_container(conn, tenant: str, run_id: str) -> str:
-    """Kill the previous container, bind a new token generation, start a fresh locked container for the run.
-
-    The container IP is assigned at start, so the token is bound right after; the agent client waits out 403 until then.
-    """
+    """Kill the previous container and free its address, then bind a new token generation to a fresh address and
+    start a fresh locked container there. The token is bound before the container starts."""
     conn.execute("SELECT set_config('app.tenant_id', %s, false)", (tenant,))
     config_path, scenario, previous, resumes = conn.execute(
         "SELECT config_path, scenario, container_id, resume_count FROM runs WHERE id = %s", (run_id,)
     ).fetchone()
     if previous:
         kill_container(previous)
-    network = os.environ["AGENT_NETWORK"]
+        stop_agent(conn, tenant, previous)
     token = secrets.token_urlsafe(24)
-    env = [
-        "PYTHONPATH=/src",
-        "PYTHONDONTWRITEBYTECODE=1",
-        "HOME=/tmp",
-        f"PROXY_URL={os.environ['PROXY_A_URL']}",
-        f"RUN_TOKEN={token}",
-        f"RUN_ID={run_id}",
-        f"AGENT_CONFIG=/src/{config_path}",
-    ]
-    if scenario:
-        env.append(f"SCENARIO={scenario}")
-    cid = create_agent_container(f"swarm-{run_id}-resume-{resumes}", os.environ["HOST_REPO"], network, env)
-    start_container(cid)
-    record_container(conn, tenant, run_id, cid)
-    bind_token(conn, tenant, run_id, token, container_ip(inspect_container(cid), network))
+    cid, _ip = start_agent(conn, tenant, run_id, token, config_path, agent_env(token, run_id, config_path, scenario),
+                           f"swarm-{run_id}-resume-{resumes}", fresh=False)
     return cid
 
 

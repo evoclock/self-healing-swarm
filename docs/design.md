@@ -22,10 +22,10 @@ The drill replays recorded calls, injects an error and a rate limit, marks both 
 
 Agents give a deadline, not a start minute, so 200 briefs due at 07:30 spread across 90 minutes instead of all firing at 06:00. Dispatch is earliest deadline first, behind these limits:
 
-- **Provider:** concurrent runs and tokens per minute. When full, a run waits or switches model. A self-hosted model is one more provider, sized by its batch slots.
+- **Provider:** requests and tokens per minute. When full, a run waits or switches model. A self-hosted model is one more provider, sized by its batch slots.
 - **Tenant:** each tenant has a concurrency limit, and it says how many of its runs happen at once.
 - **Host:** 8 containers, each with 0.5 CPU and 512 MB of RAM.
-- **Rate limits:** runs start on the API. On a 429 the agent retries with exponential backoff and jitter; if throttling continues, it falls back to the next model in the config. Each provider's token quota is split across tenants, and runs are capped at each provider's concurrency.
+- **Rate limits:** runs start on the API. On a 429 the agent retries with exponential backoff and jitter; if throttling continues, it falls back to the next model in the config. Each provider's token and request quota is split across tenants, and runs are capped at each provider's concurrency.
 
 If the scheduler predicts a missed deadline, it escalates to a person.
 
@@ -53,7 +53,7 @@ Every failure ends in one of three logged outcomes:
 
 **Evals.** Each agent has a baseline of 20 or more recorded cases with expected outputs, including the injection email; the synthetic mailbox (about 30 emails across four tenants) is the brief agent's workload, not the baseline. A temperature-0 judge model scores each case 1 to 5. Hard checks must pass: tenant-only data, no unflagged external draft, matching spreadsheet figures. A new prompt or model gets a new config hash and reruns the same baseline, keeping scores comparable. `evals run` writes an `eval_record` only if hard checks pass and the mean drops 0.3 or less; the first record uses hard checks only.
 
-**Memory.** Memory is Postgres rows keyed to a tenant and an agent: a cursor marking the last item processed and facts saved with `memory.write`. Row-level security scopes every read and write to the run token's tenant. Each run loads the facts into the prompt as quoted data, and `mail.list` starts after the cursor. The cursor moves only on `SUCCEEDED`, so a crashed run retries from the same position.
+**Memory.** Memory is Postgres rows keyed to a tenant and an agent: a cursor marking the last item processed, facts saved with `memory.write`, and summaries of past runs. Row-level security scopes every read and write to the run token's tenant. Each run loads the facts and summaries into the prompt as quoted data, and `mail.list` starts after the cursor. The cursor moves only on `SUCCEEDED`, so a crashed run retries from the same position.
 
 **Panel** (design only). Three models answer blind, then challenge each other's claims with evidence over two rounds. The parent returns agreed claims, contested ones with how each was settled, and any minority view kept, because agreement is not proof.
 

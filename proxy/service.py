@@ -10,8 +10,8 @@ from urllib.parse import urlsplit
 
 from proxy.app import Call, decide, finish_step, resolve, write_denial
 from runtime.runs import LEASE_SECONDS
-from proxy.gate import Bound, Finished, admit_tool, claim_step, finish_state, load_bound, write_event
-from proxy.providers import Cassette, KNOWN_MODELS, Provider, ReplayMiss, UnknownPrice, live_estimate, merge_trace_headers, recorded_cost, step_digest
+from proxy.gate import Bound, Finished, admit_tool, claim_step, finish_state, load_bound, quota_reserve, quota_settle, write_event
+from proxy.providers import Cassette, KNOWN_MODELS, Provider, ReplayMiss, UnknownPrice, merge_trace_headers, reserve_cost, reserve_tokens, settle_cost, recorded_cost, step_digest
 
 
 @dataclass
@@ -24,6 +24,9 @@ class ProxyContext:
     faults: list = field(default_factory=list)
     parents: dict = field(default_factory=dict)
     heartbeat_s: float = LEASE_SECONDS / 3
+    # Provider limits per minute, split across the tenants running now. None: not metered.
+    provider_tpm: int | None = None
+    provider_rpm: int | None = None
 
 
 def dispatch(ctx: ProxyContext, method: str, path: str, raw: bytes, source_ip: str, headers: dict | None = None) -> tuple[int, dict]:
@@ -80,11 +83,11 @@ def complete(ctx: ProxyContext, conn, payload: dict, source_ip: str) -> tuple[in
     if model == "local":
         charge = Decimal(0)
     elif ctx.mode == "replay":
-        charge = recorded_cost(ctx.cassette, digest) or Decimal(0)
+        charge = recorded_cost(ctx.cassette, messages, tools) or Decimal(0)
     else:
-        # Live: reserve an upper bound before the call. finish_step replaces it with the returned usage.cost.
+        # Live: reserve the upper bound before the call; finish_step settles the step to the real cost.
         try:
-            charge = live_estimate(messages, tools, model)
+            charge = reserve_cost(messages, tools, model)
         except UnknownPrice as exc:
             _note(ctx, f"complete 400 trace {tenant}.{run_id} no_price {exc.model}")
             return 400, {"error": "no_price", "model": exc.model}
@@ -93,6 +96,19 @@ def complete(ctx: ProxyContext, conn, payload: dict, source_ip: str) -> tuple[in
     if isinstance(claimed, Finished):
         _note(ctx, _complete_line(claimed.status, tenant, run_id, step_no, model, claimed.body, charge))
         return claimed.status, claimed.body
+    # Per-tenant share of the provider's tokens and requests per minute. Reserve the token ceiling now, settle to
+    # the real usage after. Over the share: the step is released and the agent gets a 429 (it backs off, then
+    # falls back to the next model).
+    metered = model != "local" and (ctx.provider_tpm or ctx.provider_rpm)
+    reserved = reserve_tokens(messages, tools) if metered else 0
+    minute = None
+    if metered:
+        minute = quota_reserve(conn, tenant, model, reserved, ctx.provider_tpm, ctx.provider_rpm)
+        if minute is None:
+            finish_step(conn, tenant, run_id, step_no, digest, "FAILED", {"error": "quota"}, claimed.claim, (0, 0, Decimal(0)))
+            write_event(conn, tenant, run_id, "quota_throttled", {"step_no": step_no, "model": model})
+            _note(ctx, f"complete 429 trace {tenant}.{run_id} step {step_no} {model} quota")
+            return 429, {"error": "quota", "model": model}
     trace = None
     if ctx.mode != "replay" and model != "local":
         parent = ctx.parents.get((tenant, run_id))
@@ -101,13 +117,17 @@ def complete(ctx: ProxyContext, conn, payload: dict, source_ip: str) -> tuple[in
         with heartbeat(ctx, bound):
             completion = _provider(ctx).complete(messages, tools, model, project_id=bound.project_id, trace=trace)
     except ReplayMiss as exc:
+        if minute is not None:
+            quota_settle(conn, tenant, model, minute, reserved, 0)
         finish_step(conn, tenant, run_id, step_no, digest, "FAILED", {"error": "replay_miss"}, claimed.claim)
         _note(ctx, _complete_line(409, tenant, run_id, step_no, model, {"error": "replay_miss"}, charge))
         return 409, {"error": "replay_miss", "digest": exc.digest}
     if completion.request_id:
         ctx.parents[(tenant, run_id)] = completion.request_id
     body = {"text": completion.text, "tokens_in": completion.tokens_in, "tokens_out": completion.tokens_out}
-    cost = Decimal(0) if model == "local" else completion.cost_usd
+    if minute is not None:
+        quota_settle(conn, tenant, model, minute, reserved, completion.tokens_in + completion.tokens_out)
+    cost = Decimal(0) if model == "local" else settle_cost(model, completion.tokens_in, completion.tokens_out, completion.cost_usd)
     won = finish_step(
         conn,
         tenant,

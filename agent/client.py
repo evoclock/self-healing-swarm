@@ -92,19 +92,14 @@ class ProxyClient:
         return body
 
     def _retry(self, method: str, path: str, payload: dict) -> dict:
-        """Wait out 403 while the token binds, and poll 202 while another caller holds the step."""
-        body = {"error": "token"}
-        status = 403
-        unbound = 0
+        """Poll 202 while another caller holds the step. A 403 is final: the token is bound to this container's
+        address before the container starts, so a 403 means the token was superseded (a resume took over)."""
         waiting = 0
-        while unbound < 60 and waiting < self.poll_limit:
+        while True:
             status, body = self._send(method, path, payload)
-            if status == 403:
-                unbound += 1
-            elif status == 202:
-                waiting += 1
-            else:
+            if status != 202 or waiting >= self.poll_limit:
                 break
+            waiting += 1
             time.sleep(0.5)
         body["status"] = status
         return body

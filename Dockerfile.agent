@@ -1,5 +1,11 @@
-FROM python:3.12-slim
-RUN pip install --no-cache-dir pyyaml
+# Base image pinned by digest; packages pinned by version and hash (requirements/agent.lock).
+FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
+COPY requirements/agent.lock /tmp/agent.lock
+RUN pip install --no-cache-dir --require-hashes -r /tmp/agent.lock && rm /tmp/agent.lock
 WORKDIR /src
+# Only the code the agent runs. Tenant configs are mounted per run: /src/agents/<tenant>, read-only, that tenant only.
+COPY agent/ /src/agent/
+COPY runtime/__init__.py runtime/config.py runtime/citations.py runtime/memory.py /src/runtime/
+COPY proxy/__init__.py proxy/providers.py /src/proxy/
 ENV PYTHONPATH=/src
 CMD ["python", "-m", "agent"]

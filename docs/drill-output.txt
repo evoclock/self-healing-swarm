@@ -2,7 +2,7 @@ proxies PASS
 proxy-a proxy-a replay
 proxy-b proxy-b replay
 kill PASS
-run_id drill-kill state SUCCEEDED resume 1 generation 2
+run_id drill-kill state SUCCEEDED resume 1 generation 1
 steps [(1, 'COMPLETED', Decimal('0')), (2, 'COMPLETED', Decimal('0')), (3, 'COMPLETED', Decimal('0.00005844')), (4, 'COMPLETED', Decimal('0'))]
 events ['step_completed', 'step_completed', 'lease_resumed', 'step_skipped', 'step_skipped', 'step_completed', 'step_completed', 'state']
 provider PASS
@@ -16,6 +16,7 @@ escape PASS
 proxy py.exec reason not_executed marker False
 shadow exit 1 PermissionError: [Errno 13] Permission denied: '/etc/shadow'
 connect exit 1 socket.gaierror: [Errno -3] Temporary failure in name resolution
+tenant_net exit 1 OSError: [Errno 101] Network is unreachable
 run_id drill-escape agent state ESCALATED (reported) foreign_id steps 1
 forward proxy denials ['connect', 'loopback']
 budget PASS
@@ -33,6 +34,13 @@ events ['step_completed', 'step_completed', 'step_completed', 'state']
 tool_error PASS
 run_id drill-tool-error state SUCCEEDED
 events ['tool_error', 'tool_retry', 'tool_error', 'tool_retry', 'step_completed', 'step_completed', 'step_completed', 'step_completed', 'state']
+bind PASS
+run_id drill-bind bound 10.231.1.16 container 10.231.1.16 lease before start True first step COMPLETED state SUCCEEDED
+networks ['swarm-agents-t-a'] leases left 0
+quota PASS
+run_id drill-quota-meter state SUCCEEDED metered tokens 435 requests 1 provider-reported tokens 435 calls 1
+run_id drill-quota-full state SUCCEEDED
+events ['step_completed', 'step_completed', 'quota_throttled', 'provider_backoff', 'quota_throttled', 'provider_backoff', 'quota_throttled', 'provider_backoff', 'quota_throttled', 'provider_fallback', 'step_completed', 'step_completed', 'state']
 memory PASS
 run_id drill-memory-1 state SUCCEEDED listed ['m-a-1', 'm-a-2', 'm-a-3', 'm-a-4', 'm-a-5', 'm-a-6', 'm-a-7', 'm-a-inject']
 run_id drill-memory-2 state SUCCEEDED listed [] artifact 'no new mail'

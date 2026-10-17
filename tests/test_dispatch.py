@@ -41,6 +41,7 @@ def test_jobs_for_today_carry_the_token_limit():
 
     jobs = jobs_for_today(Path("agents"), datetime(2026, 10, 17, 6, 0))
     assert all(job.tokens == config.limits.max_tokens for job, config, _path in jobs.values())
+    assert all(job.requests == config.limits.max_steps for job, config, _path in jobs.values())
 
 
 def test_main_reads_provider_cap_and_tpm(monkeypatch):
@@ -62,9 +63,11 @@ def test_main_reads_provider_cap_and_tpm(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "x")
     monkeypatch.setenv("PROVIDER_CAP", "4")
     monkeypatch.setenv("PROVIDER_TPM", "9000")
+    monkeypatch.setenv("PROVIDER_RPM", "60")
+    monkeypatch.setattr(d, "reap_exited", lambda conn: [])
     monkeypatch.setattr(d, "connect", lambda url: Conn())
     monkeypatch.setattr(d, "dispatch_once", fake_dispatch_once)
     import pytest
     with pytest.raises(SystemExit):
         d.main()
-    assert seen == {"provider_caps": {"primary": 4}, "provider_tpm": {"primary": 9000}}
+    assert seen == {"provider_caps": {"primary": 4}, "provider_tpm": {"primary": 9000}, "provider_rpm": {"primary": 60}}

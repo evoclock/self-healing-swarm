@@ -15,7 +15,6 @@ from outbox.smtp_log import serve_smtp
 from proxy.providers import step_digest
 from runtime.config import load_agent
 from runtime.docker_api import (
-    container_ip,
     container_logs,
     create_agent_container,
     inspect_container,
@@ -25,7 +24,8 @@ from runtime.docker_api import (
     wait_container,
 )
 from runtime.policy import RunPolicy
-from runtime.runs import bind_token, connect, events, open_run, record_container, reset_run, run_row, step_costs
+from runtime.runs import connect, events, open_run, reset_run, run_row, step_costs
+from runtime.launch import agent_env, start_agent, stop_agent, tenant_network
 from runtime.dispatch import dispatch_once, escalate_run, launch_run
 from runtime.scheduler import Job, load_config
 from runtime.watcher import resume_in_container, watch_once
@@ -56,6 +56,8 @@ def main() -> int:
         ("loop", scenario_loop),
         ("document", scenario_document),
         ("tool_error", scenario_tool_error),
+        ("bind", scenario_bind),
+        ("quota", scenario_quota),
         ("memory", scenario_memory),
         ("dispatch", scenario_dispatch),
         ("eval_gate", scenario_eval),
@@ -84,18 +86,12 @@ def check_proxies() -> tuple[bool, str]:
 
 
 def scenario_kill() -> tuple[bool, str]:
-    network = os.environ["AGENT_NETWORK"]
-    host_repo = os.environ["HOST_REPO"]
     run_id = "drill-kill"
     token = "drill-kill-token"
     conn = connect(os.environ["DATABASE_URL"])
     clear_memory(conn, "t-a", "daily-brief")
-    open_run(conn, "t-a", run_id, "daily-brief", token, "10.255.255.1", _policy(BRIEF), BRIEF, "brief")
-    first = _start_agent(host_repo, network, token, run_id, BRIEF, "brief", pause=True)
-    record_container(conn, "t-a", run_id, first)
+    first = _start_agent(conn, "t-a", "daily-brief", token, run_id, BRIEF, "brief", pause=True)
     try:
-        ip = container_ip(inspect_container(first), network)
-        bind_token(conn, "t-a", run_id, token, ip)
         if not _wait_step(conn, run_id, 2):
             return False, "step 2 did not complete\n" + container_logs(first)
         before = step_costs(conn, "t-a", run_id)
@@ -116,9 +112,9 @@ def scenario_kill() -> tuple[bool, str]:
             if not _wait_state(conn, "t-a", run_id, ("SUCCEEDED",)):
                 return False, "resume did not succeed\n" + container_logs(second)
         finally:
-            remove_container(second)
+            stop_agent(conn, "t-a", second)
     finally:
-        remove_container(first)
+        stop_agent(conn, "t-a", first)
     after = step_costs(conn, "t-a", run_id)
     costs_held = all(any(later[0] == earlier[0] and later[2] == earlier[2] for later in after) for earlier in before)
     row = run_row(conn, "t-a", run_id)
@@ -161,7 +157,7 @@ def scenario_injection() -> tuple[bool, str]:
 def scenario_escape() -> tuple[bool, str]:
     """Proof is what the drill observes itself. The agent's ESCALATED state is reported, not counted."""
     conn = connect(os.environ["DATABASE_URL"])
-    network = os.environ["AGENT_NETWORK"]
+    network = tenant_network("t-a")
     host_repo = os.environ["HOST_REPO"]
 
     # 1. The proxy refuses py.exec. The code would leave a marker in the proxy's /src and print /etc/shadow.
@@ -173,10 +169,12 @@ def scenario_escape() -> tuple[bool, str]:
     body = json.dumps(refused)
     proxy_ok = refused.get("reason") == "not_executed" and "root:" not in body and not marker.exists()
 
-    # 2. A container with the agent HostConfig on swarm-agents runs the two probes itself. Both must fail.
+    # 2. A container with the agent HostConfig on t-a's network runs the probes itself. All must fail: the file,
+    # the internet, and an address on t-b's network (tenant networks are separate and internal).
     probes = {
         "shadow": "open('/etc/shadow').read()",
         "connect": "import socket; socket.create_connection(('example.com', 80), 3)",
+        "tenant_net": "import socket; socket.create_connection(('10.231.2.2', 18894), 3)",
     }
     probe_out = []
     probes_ok = True
@@ -292,8 +290,8 @@ def scenario_dispatch() -> tuple[bool, str]:
         for tenant, run_id, _cid in started:
             _wait_state(conn, tenant, run_id, TERMINAL)
     finally:
-        for _tenant, _run_id, cid in started:
-            remove_container(cid)
+        for tenant, _run_id, cid in started:
+            stop_agent(conn, tenant, cid)
     states = {run_id: run_row(conn, plan[run_id][0], run_id)["state"] for run_id in plan}
     order = [run_id for _tenant, run_id, _cid in started]
     ok = (
@@ -389,6 +387,80 @@ def scenario_send() -> tuple[bool, str]:
     return ok, f"smtp {len(logged)} first sink {len(first_sink)} second sink {len(second_sink)} message {message}"
 
 
+def scenario_quota() -> tuple[bool, str]:
+    """Metered per-tenant provider quota. A normal run debits exactly the tokens the provider reported (the token
+    ceiling reserved before each call is credited back) and one request per call. Then t-a's bucket is full for
+    the next minutes: the proxy answers 429 quota without a provider call, the agent backs off and falls back."""
+    conn = connect(os.environ["DATABASE_URL"])
+    conn.execute("SELECT set_config('app.tenant_id', 't-a', false)")
+    conn.execute("DELETE FROM quota_minute WHERE tenant_id = 't-a'")
+    row, ev, _r = _run("drill-quota-meter", "t-a", "daily-brief", BRIEF, "brief", [])
+    conn.execute("SELECT set_config('app.tenant_id', 't-a', false)")
+    metered = conn.execute(
+        "SELECT COALESCE(sum(tokens), 0), COALESCE(sum(requests), 0) FROM quota_minute WHERE tenant_id = 't-a' AND provider = 'primary'"
+    ).fetchone()
+    used = conn.execute(
+        """
+        SELECT COALESCE(sum(tokens_in + tokens_out), 0), count(*) FROM steps
+        WHERE run_id = 'drill-quota-meter' AND model = 'primary' AND status = 'COMPLETED' AND tokens_in IS NOT NULL
+        """
+    ).fetchone()
+    meter_ok = row["state"] == "SUCCEEDED" and int(metered[0]) == int(used[0]) > 0 and int(metered[1]) == int(used[1])
+    conn.execute(
+        """
+        INSERT INTO quota_minute (tenant_id, provider, minute, tokens, requests)
+        SELECT 't-a', 'primary', date_trunc('minute', now()) + make_interval(mins => n), 100000000, 0
+        FROM generate_series(0, 3) AS n
+        ON CONFLICT (tenant_id, provider, minute) DO UPDATE SET tokens = EXCLUDED.tokens
+        """
+    )
+    try:
+        full, fev, _r2 = _run("drill-quota-full", "t-a", "daily-brief", BRIEF, "brief", [])
+    finally:
+        conn.execute("SELECT set_config('app.tenant_id', 't-a', false)")
+        conn.execute("DELETE FROM quota_minute WHERE tenant_id = 't-a'")
+    full_ok = full["state"] == "SUCCEEDED" and "quota_throttled" in fev and "provider_fallback" in fev
+    return meter_ok and full_ok, (
+        f"run_id drill-quota-meter state {row['state']} metered tokens {metered[0]} requests {metered[1]} "
+        f"provider-reported tokens {used[0]} calls {used[1]}\n"
+        f"run_id drill-quota-full state {full['state']}\nevents {fev}"
+    )
+
+
+def scenario_bind() -> tuple[bool, str]:
+    """The token is bound to the container's address before the container starts. Proof: the address leased and
+    bound before start is the address Docker gave the container, the lease predates the start, the agent's first
+    proxy call succeeded (a 403 would end the run), and the address is free again after the container is removed."""
+    conn = connect(os.environ["DATABASE_URL"])
+    run_id = "drill-bind"
+    clear_memory(conn, "t-a", "daily-brief")
+    cid = _start_agent(conn, "t-a", "daily-brief", f"token-{run_id}", run_id, BRIEF, "brief", pause=False)
+    try:
+        conn.execute("SELECT set_config('app.tenant_id', 't-a', false)")
+        bound, allocated = conn.execute(
+            "SELECT t.container_ip, l.allocated_at FROM run_tokens t JOIN ip_leases l ON l.ip = t.container_ip WHERE t.run_id = %s",
+            (run_id,),
+        ).fetchone()
+        info = inspect_container(cid)
+        actual = info["NetworkSettings"]["Networks"][tenant_network("t-a")]["IPAddress"]
+        started = info["State"]["StartedAt"]
+        _wait_state(conn, "t-a", run_id, TERMINAL)
+    finally:
+        stop_agent(conn, "t-a", cid)
+    first = conn.execute("SELECT status FROM steps WHERE run_id = %s AND step_no = 1", (run_id,)).fetchone()
+    left = conn.execute("SELECT count(*) FROM ip_leases WHERE run_id = %s", (run_id,)).fetchone()[0]
+    networks = sorted(info["NetworkSettings"]["Networks"])
+    row = run_row(conn, "t-a", run_id)
+    from datetime import datetime
+    started_at = datetime.fromisoformat(started[:26].rstrip("Z") + "+00:00") if started else None
+    before = started_at is not None and allocated < started_at
+    ok = str(bound) == actual and before and first is not None and first[0] == "COMPLETED" and left == 0 and networks == [tenant_network("t-a")]
+    return ok, (
+        f"run_id {run_id} bound {bound} container {actual} lease before start {before} first step {first and first[0]} "
+        f"state {row['state']}\nnetworks {networks} leases left {left}"
+    )
+
+
 def scenario_memory() -> tuple[bool, str]:
     """Two brief runs back to back. The second mail.list starts at the stored cursor, so it sees no mail the
     first run processed, and the run ends 'no new mail' (the proxy checks there really is none)."""
@@ -452,21 +524,17 @@ def run_locked(
     keep_memory: bool = False,
 ) -> tuple[dict, str]:
     """open_run, start a fresh locked agent container, bind its IP, wait for a terminal state."""
-    network = os.environ["AGENT_NETWORK"]
     conn = connect(os.environ["DATABASE_URL"])
     if not keep_memory:
         clear_memory(conn, tenant, agent_id)
     token = f"token-{run_id}"
-    open_run(conn, tenant, run_id, agent_id, token, "10.255.255.1", policy, config_path, scenario)
     ProxyClient(os.environ["PROXY_A_URL"], "").faults(list(faults or []))
-    cid = _start_agent(os.environ["HOST_REPO"], network, token, run_id, config_path, scenario, pause=False)
-    record_container(conn, tenant, run_id, cid)
+    cid = _start_agent(conn, tenant, agent_id, token, run_id, config_path, scenario, pause=False, policy=policy)
     try:
-        bind_token(conn, tenant, run_id, token, container_ip(inspect_container(cid), network))
         _wait_state(conn, tenant, run_id, TERMINAL)
         logs = container_logs(cid)
     finally:
-        remove_container(cid)
+        stop_agent(conn, tenant, cid)
         ProxyClient(os.environ["PROXY_A_URL"], "").faults([])
     return run_row(conn, tenant, run_id), logs
 
@@ -523,31 +591,14 @@ def _run(run_id, tenant, agent_id, config_path, scenario, faults, policy: RunPol
     return row, events(conn, tenant, run_id), (logs.strip().splitlines() or [""])[-1][:600]
 
 
-def _start_agent(
-    host_repo: str,
-    network: str,
-    token: str,
-    run_id: str,
-    config_path: str,
-    scenario: str,
-    pause: bool,
-    suffix: str = "",
-) -> str:
-    env = [
-        "PYTHONPATH=/src",
-        "PYTHONDONTWRITEBYTECODE=1",
-        "HOME=/tmp",
-        f"PROXY_URL={os.environ['PROXY_A_URL']}",
-        f"RUN_TOKEN={token}",
-        f"RUN_ID={run_id}",
-        f"AGENT_CONFIG=/src/{config_path}",
-        f"SCENARIO={scenario}",
-    ]
-    if pause:
-        env.extend(["DRILL_PAUSE_AFTER_STEP=2", "DRILL_PAUSE_SECONDS=300"])
-    container_id = create_agent_container(f"swarm-{run_id}{suffix}", host_repo, network, env)
-    start_container(container_id)
-    return container_id
+def _start_agent(conn, tenant, agent_id, token, run_id, config_path, scenario, pause: bool, policy=None) -> str:
+    """The launcher the dispatcher uses: address first, token bound to it, then create and start."""
+    extra = ["DRILL_PAUSE_AFTER_STEP=2", "DRILL_PAUSE_SECONDS=300"] if pause else []
+    cid, _ip = start_agent(
+        conn, tenant, run_id, token, config_path, agent_env(token, run_id, config_path, scenario, extra),
+        f"swarm-{run_id}", fresh=True, agent_id=agent_id, policy=policy or _policy(config_path), scenario=scenario,
+    )
+    return cid
 
 
 def _wait_step(conn, run_id: str, step_no: int) -> bool:

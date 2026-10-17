@@ -5,7 +5,7 @@ from decimal import Decimal
 from outbox.send import create_draft
 from proxy.app import Claim, begin_step, finish_step, over_budget, write_denial
 from runtime.citations import parse_cites
-from runtime.memory import MemoryRefused, memory_write
+from runtime.memory import MemoryRefused, memory_write, run_summary
 from runtime.policy import RunPolicy
 from runtime.scheduler import IllegalTransition, transition
 
@@ -222,8 +222,11 @@ def finish_state(conn, bound: Bound, state: str, artifact: str) -> Finished:
             cited = parse_cites(artifact)
             mail_ids = _owned(conn, "mail", tenant, cited)
             doc_ids = _owned(conn, "documents", tenant, cited)
-            if not cited and artifact.strip() == NO_NEW_MAIL and not _mail_after_cursor(conn, tenant, agent_id):
-                pass  # nothing past the cursor: an empty brief is correct, checked here rather than trusted
+            if not cited and artifact.strip() == NO_NEW_MAIL:
+                if _mail_after_cursor(conn, tenant, agent_id):
+                    # Mail arrived after the agent listed. Not a failure and not a success: tell it to list again.
+                    write_event(conn, tenant, run_id, "new_mail_retry", {})
+                    return Finished(200, {"retry": "new_mail", "state": current})
             elif not cited or any(item not in mail_ids and item not in doc_ids for item in cited):
                 state = "FAILED"
             else:
@@ -237,8 +240,45 @@ def finish_state(conn, bound: Bound, state: str, artifact: str) -> Finished:
         conn.execute("UPDATE runs SET state = %s, artifact = %s WHERE id = %s", (nxt, artifact, run_id))
         if cursor is not None:
             memory_write(conn, tenant, agent_id, "cursor", cursor, (cursor,), run_id)
+        if nxt == "SUCCEEDED" and artifact.strip() != NO_NEW_MAIL:
+            memory_write(conn, tenant, agent_id, "fact", run_summary(run_id, artifact), (), run_id)
         write_event(conn, tenant, run_id, "state", {"state": nxt})
     return Finished(200, {"state": nxt})
+
+
+def quota_reserve(conn, tenant: str, provider: str, tokens: int, tpm: int | None, rpm: int | None):
+    """Debit this call's token ceiling and one request from the tenant's bucket for the current minute.
+    The share is the provider limit divided by the tenants running now. Returns the minute, or None when over."""
+    with conn.transaction():
+        conn.execute("SELECT set_config('app.tenant_id', %s, false)", (tenant,))
+        tenants = conn.execute("SELECT active_tenants()").fetchone()[0]
+        minute = conn.execute("SELECT date_trunc('minute', now())").fetchone()[0]
+        conn.execute(
+            "INSERT INTO quota_minute (tenant_id, provider, minute) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+            (tenant, provider, minute),
+        )
+        used, requests = conn.execute(
+            "SELECT tokens, requests FROM quota_minute WHERE tenant_id = %s AND provider = %s AND minute = %s FOR UPDATE",
+            (tenant, provider, minute),
+        ).fetchone()
+        if tpm and used + tokens > tpm // tenants:
+            return None
+        if rpm and requests + 1 > rpm // tenants:
+            return None
+        conn.execute(
+            "UPDATE quota_minute SET tokens = tokens + %s, requests = requests + 1 WHERE tenant_id = %s AND provider = %s AND minute = %s",
+            (tokens, tenant, provider, minute),
+        )
+        return minute
+
+
+def quota_settle(conn, tenant: str, provider: str, minute, reserved: int, actual: int) -> None:
+    """Replace the reservation with the tokens the provider reported: credit back the unused part."""
+    conn.execute("SELECT set_config('app.tenant_id', %s, false)", (tenant,))
+    conn.execute(
+        "UPDATE quota_minute SET tokens = GREATEST(0, tokens - %s + %s) WHERE tenant_id = %s AND provider = %s AND minute = %s",
+        (reserved, actual, tenant, provider, minute),
+    )
 
 
 def _agent(conn, run_id: str) -> str:
@@ -296,6 +336,7 @@ def _facts(conn, tenant: str, agent_id: str) -> list[str]:
         """
         SELECT body FROM memory
         WHERE tenant_id = %s AND agent_id = %s AND kind = 'fact' AND NOT flagged
+          AND (expires_at IS NULL OR expires_at > now())
         ORDER BY created_at, id
         """,
         (tenant, agent_id),

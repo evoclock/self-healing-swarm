@@ -420,3 +420,46 @@ def test_forward_refuses_a_non_http_proxy_url():
 
     with pytest.raises(ValueError):
         ProxyClient("https://proxy:8080", "t").forward("CONNECT", "example.com:443")
+
+
+class Racing(Fake):
+    """First list is empty; the proxy says new mail arrived; the second list has it."""
+
+    def __init__(self, replies):
+        super().__init__(replies)
+        self.lists = 0
+
+    def tool(self, name, args, step):
+        if name == "mail.list":
+            self.lists += 1
+            self.steps_listed = getattr(self, "steps_listed", []) + [step]
+            if self.lists == 1:
+                return {"messages": [], "domains": ["a.example"]}
+        return super().tool(name, args, step)
+
+    def state(self, state, artifact):
+        self.states.append((state, artifact))
+        if artifact == "no new mail":
+            return {"retry": "new_mail", "state": "RUNNING"}
+        return {"state": state}
+
+
+def test_a_new_mail_retry_lists_once_more_and_briefs_it():
+    fake = Racing([{"status": 200, "text": "brief"}])
+    result = execute(fake, config(), "run-race", "brief", Executor())
+    assert fake.steps_listed == [1, 11]
+    assert fake.states[0] == ("SUCCEEDED", "no new mail") and fake.states[-1][0] == "SUCCEEDED"
+    assert result["state"] == "SUCCEEDED" and "cites: m-a-1" in result["artifact"]
+
+
+def test_a_403_is_final_because_the_token_is_bound_before_start(monkeypatch):
+    client = ProxyClient("http://proxy:1", "tok")
+    sends = []
+
+    def send(method, path, payload):
+        sends.append(path)
+        return 403, {"error": "token"}
+
+    monkeypatch.setattr(client, "_send", send)
+    assert client.tool("mail.list", {}, 1)["status"] == 403
+    assert len(sends) == 1

@@ -78,3 +78,18 @@ def test_a_job_larger_than_its_tenant_share_escalates_at_once_for_quota():
     placed = {p.job_id: p for p in schedule((Job("big", "t-a", 1, 60, tokens=2000), Job("ok", "t-b", 1, 60, tokens=500)), {"t-a": 1, "t-b": 1}, provider_tpm={"primary": 3000})}
     assert placed["big"].escalated and placed["big"].reason == "quota" and placed["big"].start == -1
     assert placed["ok"].start == 0 and not placed["ok"].escalated
+
+
+def test_requests_per_minute_are_split_across_tenants_too():
+    from runtime.scheduler import Job, schedule
+
+    jobs = (Job("a1", "t-a", 1, 30, requests=20), Job("a2", "t-a", 1, 30, requests=20), Job("b1", "t-b", 1, 30, requests=20))
+    placed = {p.job_id: p for p in schedule(jobs, {"t-a": 2, "t-b": 2}, provider_rpm={"primary": 60})}
+    assert placed["a1"].start == 0 and placed["b1"].start == 0 and placed["a2"].start == 1
+
+
+def test_a_job_with_more_requests_than_its_share_escalates_for_quota():
+    from runtime.scheduler import Job, schedule
+
+    placed = schedule((Job("big", "t-a", 1, 30, requests=100),), {"t-a": 1}, provider_rpm={"primary": 60})
+    assert placed[0].escalated and placed[0].reason == "quota"
