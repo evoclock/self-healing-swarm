@@ -1,0 +1,11 @@
+# The agent image needs only its code and its lockfile.
+*
+!agent/
+!runtime/__init__.py
+!runtime/config.py
+!runtime/citations.py
+!runtime/memory.py
+!proxy/__init__.py
+!proxy/providers.py
+!requirements/agent.lock
+**/__pycache__

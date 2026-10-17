@@ -30,11 +30,11 @@ record: up
 
 capture: up
 	mkdir -p recordings/evals
-	docker compose --profile tools run --rm --entrypoint bash record -c "pip install -q 'psycopg[binary]' pyyaml openai && python -m evals.capture"
+	docker compose --profile tools run --rm --entrypoint bash record -c "pip install -q --require-hashes -r requirements/services.lock && python -m evals.capture"
 
 evals: up
 	mkdir -p .audit
-	set -o pipefail; docker compose run --rm --entrypoint bash test -c "pip install -q 'psycopg[binary]' pyyaml && python -m evals --agent daily-brief --candidate agents/t-a/daily_brief.yaml" 2>&1 | tee .audit/make-evals.txt
+	set -o pipefail; docker compose run --rm --entrypoint bash test -c "pip install -q --require-hashes -r requirements/services.lock && python -m evals --agent daily-brief --candidate agents/t-a/daily_brief.yaml" 2>&1 | tee .audit/make-evals.txt
 	test -s .audit/make-evals.txt
 
 clean:

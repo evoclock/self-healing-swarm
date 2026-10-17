@@ -1,6 +1,8 @@
+import http.client
 import json
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 
@@ -57,25 +59,47 @@ class ProxyClient:
         body["status"] = status
         return body
 
+    def heartbeat(self) -> dict:
+        """Renews the run's lease while the agent works locally (py.exec, sheet program)."""
+        status, body = self._send("POST", "/v1/heartbeat", {"token": self.token})
+        body["status"] = status
+        return body
+
+    def forward(self, method: str, target: str) -> dict:
+        """Use the proxy as a forward proxy (CONNECT host:port or an absolute URL). The proxy refuses these."""
+        parsed = urllib.parse.urlsplit(self.base_url)
+        # The proxy is plain HTTP on the internal agent network; there is no TLS hop to it.
+        if parsed.scheme != "http":
+            raise ValueError(f"forward() needs an http:// proxy URL, got {parsed.scheme}")
+        conn = http.client.HTTPConnection(parsed.hostname, parsed.port or 80, timeout=30)
+        try:
+            conn.request(method, target, headers={"X-Run-Token": self.token})
+            response = conn.getresponse()
+            raw = response.read().decode()
+            status = response.status
+        finally:
+            conn.close()
+        try:
+            body = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            body = {"error": raw}
+        body["status"] = status
+        return body
+
     def faults(self, faults: list[str]) -> dict:
         status, body = self._send("POST", "/v1/faults", {"faults": faults})
         body["status"] = status
         return body
 
     def _retry(self, method: str, path: str, payload: dict) -> dict:
-        """Wait out 403 while the token binds, and poll 202 while another caller holds the step."""
-        body = {"error": "token"}
-        status = 403
-        unbound = 0
+        """Poll 202 while another caller holds the step. A 403 is final: the token is bound to this container's
+        address before the container starts, so a 403 means the token was superseded (a resume took over)."""
         waiting = 0
-        while unbound < 60 and waiting < self.poll_limit:
+        while True:
             status, body = self._send(method, path, payload)
-            if status == 403:
-                unbound += 1
-            elif status == 202:
-                waiting += 1
-            else:
+            if status != 202 or waiting >= self.poll_limit:
                 break
+            waiting += 1
             time.sleep(0.5)
         body["status"] = status
         return body

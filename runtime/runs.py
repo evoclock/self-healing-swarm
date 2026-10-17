@@ -1,9 +1,14 @@
+import os
 import secrets
 
 import psycopg
 
 from runtime.policy import RunPolicy
 from runtime.scheduler import transition
+
+
+# One lease length for the proxy heartbeat and the watcher.
+LEASE_SECONDS = int(os.environ.get("PROXY_LEASE_S", "15"))
 
 
 def connect(database_url: str):
@@ -24,16 +29,26 @@ def reset_run(conn, tenant: str, run_id: str) -> None:
     conn.execute("DELETE FROM runs WHERE id = %s", (run_id,))
 
 
-def open_run(conn, tenant: str, run_id: str, agent_id: str, token: str, source_ip: str, policy: RunPolicy) -> None:
+def open_run(
+    conn,
+    tenant: str,
+    run_id: str,
+    agent_id: str,
+    token: str,
+    source_ip: str,
+    policy: RunPolicy,
+    config_path: str | None = None,
+    scenario: str | None = None,
+) -> None:
     """Fresh run: wipes the journal. Resume must call bind_token, never this."""
     conn.execute("SELECT set_config('app.tenant_id', %s, false)", (tenant,))
     reset_run(conn, tenant, run_id)
     conn.execute(
         """
-        INSERT INTO runs (id, tenant_id, agent_id, state, max_usd, tools, generation)
-        VALUES (%s, %s, %s, 'QUEUED', %s, %s, 0)
+        INSERT INTO runs (id, tenant_id, agent_id, state, max_usd, tools, generation, config_path, scenario)
+        VALUES (%s, %s, %s, 'QUEUED', %s, %s, 0, %s, %s)
         """,
-        (run_id, tenant, agent_id, policy.max_usd, sorted(policy.tools)),
+        (run_id, tenant, agent_id, policy.max_usd, sorted(policy.tools), config_path, scenario),
     )
     transition("QUEUED", "RUNNING")
     conn.execute("UPDATE runs SET state = 'RUNNING', resume_count = 0 WHERE id = %s", (run_id,))
@@ -44,6 +59,12 @@ def open_run(conn, tenant: str, run_id: str, agent_id: str, token: str, source_i
         """,
         (token, tenant, run_id, source_ip),
     )
+
+
+def record_container(conn, tenant: str, run_id: str, container_id: str) -> None:
+    """The container now working the run. The watcher kills it before starting a replacement."""
+    conn.execute("SELECT set_config('app.tenant_id', %s, false)", (tenant,))
+    conn.execute("UPDATE runs SET container_id = %s WHERE id = %s", (container_id, run_id))
 
 
 def bind_token(conn, tenant: str, run_id: str, token: str, source_ip: str) -> int:

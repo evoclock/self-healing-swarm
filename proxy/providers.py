@@ -15,6 +15,55 @@ GATEWAY_MODELS = {
 }
 
 
+# Dollars per token, input or output, keyed by the real model id, for the pre-call estimate of a live call.
+# Set at or above the recorded usage.cost per output token (0.00005844 for 231 output tokens), so it does not undercount.
+# (input, output) price per token for each real model id.
+PRICES = {"zai/glm-5.3-flash": (Decimal("0.00000026"), Decimal("0.00000026")), "GLM-5.3-Flash-EXL3-TF-FNC7": (Decimal(0), Decimal(0))}
+PRICE_PER_TOKEN = {model: max(prices) for model, prices in PRICES.items()}
+
+
+# Quota is per provider, not per model name: every gateway model shares the gateway's limits.
+PROVIDER_OF = {"primary": "gateway", "local": "local"}
+
+
+class UnknownPrice(Exception):
+    def __init__(self, model: str):
+        self.model = model
+        super().__init__(f"no_price: {model}")
+
+
+def prompt_tokens(messages, tools) -> int:
+    """About 4 characters per token, rounded up. Used for the runner's own token limit."""
+    return -(-len(json.dumps({"messages": messages, "tools": tools})) // 4)
+
+
+def prompt_token_ceiling(messages, tools) -> int:
+    """A hard upper bound on prompt tokens: the request's UTF-8 bytes (a token is at least one byte)."""
+    return len(json.dumps({"messages": messages, "tools": tools}).encode())
+
+
+def reserve_tokens(messages, tools, max_tokens: int = OUTPUT_CAP) -> int:
+    return prompt_token_ceiling(messages, tools) + max_tokens
+
+
+def reserve_cost(messages, tools, model: str, max_tokens: int = OUTPUT_CAP) -> Decimal:
+    """What a live call reserves against the budget before it goes out: the prompt-token ceiling plus max_tokens
+    (the call is sent with that cap), all at the model's higher per-token price. It can only over-reserve. The step is
+    settled to the returned usage.cost when the call finishes. No price, no call."""
+    model_id = GATEWAY_MODELS.get(model, model)
+    if model_id not in PRICE_PER_TOKEN:
+        raise UnknownPrice(model_id)
+    return reserve_tokens(messages, tools, max_tokens) * PRICE_PER_TOKEN[model_id]
+
+
+def settle_cost(model: str, tokens_in: int, tokens_out: int, reported: Decimal | None) -> Decimal:
+    """The real charge: usage.cost when the provider reports it, else tokens at the listed prices."""
+    if reported is not None:
+        return reported
+    price_in, price_out = PRICES.get(GATEWAY_MODELS.get(model, model), (Decimal(0), Decimal(0)))
+    return tokens_in * price_in + tokens_out * price_out
+
+
 class ReplayMiss(Exception):
     def __init__(self, digest: str):
         self.digest = digest
@@ -101,6 +150,22 @@ class Cassette:
             raise ReplayMiss(digest)
         return path.read_bytes()
 
+    def lookup(self, messages, tools) -> bytes:
+        """The recording for these messages. Recordings made before quoting was applied to every line of a quoted
+        block are found under the unquoted form of the same messages (see legacy_quoting). Nothing is re-recorded or
+        rewritten: the same real response is served for the same request text, modulo the '> ' markers."""
+        digest = step_digest(messages, tools)
+        try:
+            return self.get(digest)
+        except ReplayMiss:
+            legacy = legacy_quoting(messages)
+            if legacy == messages:
+                raise
+            try:
+                return self.get(step_digest(legacy, tools))
+            except ReplayMiss:
+                raise ReplayMiss(digest) from None
+
     def put(self, digest: str, body: bytes) -> None:
         (self.root / digest).write_bytes(body)
 
@@ -116,7 +181,7 @@ class Provider:
     def complete(self, messages, tools, model: str, temperature=None, max_tokens=None, project_id=None, trace=None) -> Completion:
         digest = step_digest(messages, tools)
         if self.mode == "replay":
-            return Completion.from_json(self.cassette.get(digest))
+            return Completion.from_json(self.cassette.lookup(messages, tools))
         if self.upstream is None:
             raise RuntimeError("record mode has no upstream")
         completion = self.upstream(
@@ -136,9 +201,25 @@ def gateway_model(name: str) -> str:
     return GATEWAY_MODELS.get(name, name)
 
 
-def recorded_cost(cassette: Cassette, digest: str) -> Decimal | None:
+def legacy_quoting(messages):
+    """The document prompt as it was recorded: the document id line quoted, the body lines between it and the
+    'py.exec total' line not. Only that exact shape is mapped; any other message is returned unchanged."""
+    out = []
+    for message in messages:
+        content = message.get("content")
+        if message.get("role") == "user" and isinstance(content, str):
+            lines = content.split("\n")
+            if len(lines) >= 3 and lines[0].startswith("> ") and lines[-1].startswith("py.exec total ") \
+                    and all(line.startswith("> ") for line in lines[1:-1]):
+                body = [line[2:] for line in lines[1:-1]]
+                message = {**message, "content": "\n".join([lines[0], *body, lines[-1]])}
+        out.append(message)
+    return out
+
+
+def recorded_cost(cassette: Cassette, messages, tools) -> Decimal | None:
     try:
-        raw = cassette.get(digest)
+        raw = cassette.lookup(messages, tools)
     except ReplayMiss:
         return None
     return Completion.from_json(raw).cost_usd

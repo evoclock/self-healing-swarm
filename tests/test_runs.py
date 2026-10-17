@@ -57,10 +57,12 @@ def test_hang_is_retried_once():
 
 def test_provider_pressure_switches_model():
     models = ("primary", "local")
-    assert after_provider_pressure(3, False, models, "primary") == ("fallback", "local")
-    assert after_provider_pressure(0, True, models, "primary") == ("fallback", "local")
-    assert after_provider_pressure(1, False, models, "primary") == ("stay", "primary")
-    assert after_provider_pressure(3, False, models, "local") == ("escalate", "local")
+    assert after_provider_pressure(3, 0, models, "primary") == ("fallback", "local")
+    assert after_provider_pressure(0, 1, models, "primary") == ("backoff", "primary")
+    assert after_provider_pressure(0, 3, models, "primary") == ("backoff", "primary")
+    assert after_provider_pressure(0, 4, models, "primary") == ("fallback", "local")
+    assert after_provider_pressure(1, 0, models, "primary") == ("stay", "primary")
+    assert after_provider_pressure(3, 0, models, "local") == ("escalate", "local")
 
 
 def test_loop_and_budget_stop_keep_the_artifact():

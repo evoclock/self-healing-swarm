@@ -1,14 +1,16 @@
 import json
 from dataclasses import dataclass
+import sys
 from decimal import Decimal
 
 from outbox.send import create_draft
 from proxy.app import Claim, begin_step, finish_step, over_budget, write_denial
 from runtime.citations import parse_cites
-from runtime.memory import MemoryRefused, memory_write
+from runtime.memory import MemoryRefused, memory_write, run_summary
 from runtime.policy import RunPolicy
 from runtime.scheduler import IllegalTransition, transition
 
+NO_NEW_MAIL = "no new mail"
 PROXY_TOOLS = frozenset({"mail.list", "mail.read", "docs.read", "memory.write", "draft.create"})
 
 
@@ -149,14 +151,13 @@ def perform(conn, bound: Bound, name: str, args: dict) -> dict:
     tenant = bound.tenant_id
     conn.execute("SELECT set_config('app.tenant_id', %s, false)", (tenant,))
     if name == "mail.list":
-        rows = conn.execute(
-            """
-            SELECT id, from_addr, to_addr, subject, body, attachment_id
-            FROM mail WHERE tenant_id = %s ORDER BY id
-            """,
-            (tenant,),
-        ).fetchall()
-        return {"messages": [_mail(row, tenant) for row in rows], "domains": _domains(conn, tenant)}
+        agent_id = _agent(conn, bound.run_id)
+        rows = _mail_after_cursor(conn, tenant, agent_id)
+        result = {"messages": [_mail(row, tenant) for row in rows], "domains": _domains(conn, tenant)}
+        facts = _facts(conn, tenant, agent_id)
+        if facts:
+            result["facts"] = facts
+        return result
     if name == "mail.read":
         ids = [str(item) for item in args.get("ids") or []]
         rows = conn.execute(
@@ -222,10 +223,17 @@ def finish_state(conn, bound: Bound, state: str, artifact: str) -> Finished:
             cited = parse_cites(artifact)
             mail_ids = _owned(conn, "mail", tenant, cited)
             doc_ids = _owned(conn, "documents", tenant, cited)
-            if not cited or any(item not in mail_ids and item not in doc_ids for item in cited):
+            if not cited and artifact.strip() == NO_NEW_MAIL:
+                if _mail_after_cursor(conn, tenant, agent_id):
+                    # Mail arrived after the agent listed. Not a failure and not a success: tell it to list again.
+                    write_event(conn, tenant, run_id, "new_mail_retry", {})
+                    return Finished(200, {"retry": "new_mail", "state": current})
+            elif not cited or any(item not in mail_ids and item not in doc_ids for item in cited):
                 state = "FAILED"
             else:
-                cursor = next((item for item in reversed(cited) if item in mail_ids), None)
+                cursor = _latest(conn, tenant, [item for item in cited if item in mail_ids])
+                if cursor is not None and not _is_after_cursor(conn, tenant, agent_id, cursor):
+                    cursor = None  # the cursor only moves forward by (received_at, id)
         try:
             nxt = transition(current, state)
         except IllegalTransition as exc:
@@ -233,8 +241,111 @@ def finish_state(conn, bound: Bound, state: str, artifact: str) -> Finished:
         conn.execute("UPDATE runs SET state = %s, artifact = %s WHERE id = %s", (nxt, artifact, run_id))
         if cursor is not None:
             memory_write(conn, tenant, agent_id, "cursor", cursor, (cursor,), run_id)
+        if nxt == "SUCCEEDED" and artifact.strip() != NO_NEW_MAIL:
+            memory_write(conn, tenant, agent_id, "summary", run_summary(run_id, artifact), (), run_id)
         write_event(conn, tenant, run_id, "state", {"state": nxt})
     return Finished(200, {"state": nxt})
+
+
+def quota_reserve(conn, tenant: str, provider: str, tokens: int, tpm: int | None, rpm: int | None):
+    """Debit this call's token ceiling and one request from the tenant's bucket for the current minute.
+    The share is the provider limit divided by the tenants running now. Returns the minute, or None when over."""
+    with conn.transaction():
+        conn.execute("SELECT set_config('app.tenant_id', %s, false)", (tenant,))
+        tenants = conn.execute("SELECT active_tenants()").fetchone()[0]
+        minute = conn.execute("SELECT date_trunc('minute', now())").fetchone()[0]
+        conn.execute(
+            "INSERT INTO quota_minute (tenant_id, provider, minute) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+            (tenant, provider, minute),
+        )
+        used, requests = conn.execute(
+            "SELECT tokens, requests FROM quota_minute WHERE tenant_id = %s AND provider = %s AND minute = %s FOR UPDATE",
+            (tenant, provider, minute),
+        ).fetchone()
+        if tpm and used + tokens > tpm // tenants:
+            return None
+        if rpm and requests + 1 > rpm // tenants:
+            return None
+        conn.execute(
+            "UPDATE quota_minute SET tokens = tokens + %s, requests = requests + 1 WHERE tenant_id = %s AND provider = %s AND minute = %s",
+            (tokens, tenant, provider, minute),
+        )
+        return minute
+
+
+def quota_settle(conn, tenant: str, provider: str, minute, reserved: int, actual: int) -> None:
+    """Replace the reservation with the tokens the provider reported: credit back the unused part. The reservation
+    is a ceiling, so real use above it means the ceiling is wrong: it is logged, and the real use is still charged."""
+    if actual > reserved:
+        print(f"quota settle over reservation {tenant} {provider} reserved {reserved} actual {actual}", file=sys.stderr, flush=True)
+    conn.execute("SELECT set_config('app.tenant_id', %s, false)", (tenant,))
+    conn.execute(
+        "UPDATE quota_minute SET tokens = GREATEST(0, tokens - %s + %s) WHERE tenant_id = %s AND provider = %s AND minute = %s",
+        (reserved, actual, tenant, provider, minute),
+    )
+
+
+def _agent(conn, run_id: str) -> str:
+    return conn.execute("SELECT agent_id FROM runs WHERE id = %s", (run_id,)).fetchone()[0]
+
+
+def _mail_after_cursor(conn, tenant: str, agent_id: str) -> list:
+    """The tenant's mail after this agent's stored cursor, oldest first; all of it when no cursor."""
+    return conn.execute(
+        """
+        WITH c AS (
+            SELECT m.received_at, m.id FROM memory k
+            JOIN mail m ON m.id = k.body AND m.tenant_id = k.tenant_id
+            WHERE k.tenant_id = %s AND k.agent_id = %s AND k.kind = 'cursor'
+            ORDER BY m.received_at DESC, m.id DESC LIMIT 1
+        )
+        SELECT mail.id, from_addr, to_addr, subject, body, attachment_id
+        FROM mail LEFT JOIN c ON true
+        WHERE mail.tenant_id = %s
+          AND (c.id IS NULL OR (mail.received_at, mail.id) > (c.received_at, c.id))
+        ORDER BY mail.received_at, mail.id
+        """,
+        (tenant, agent_id, tenant),
+    ).fetchall()
+
+
+def _is_after_cursor(conn, tenant: str, agent_id: str, mail_id: str) -> bool:
+    row = conn.execute(
+        """
+        SELECT NOT EXISTS (
+            SELECT 1 FROM memory k
+            JOIN mail c ON c.id = k.body AND c.tenant_id = k.tenant_id
+            JOIN mail m ON m.id = %s AND m.tenant_id = k.tenant_id
+            WHERE k.tenant_id = %s AND k.agent_id = %s AND k.kind = 'cursor'
+              AND (c.received_at, c.id) >= (m.received_at, m.id)
+        )
+        """,
+        (mail_id, tenant, agent_id),
+    ).fetchone()
+    return bool(row[0])
+
+
+def _latest(conn, tenant: str, ids: list) -> str | None:
+    if not ids:
+        return None
+    row = conn.execute(
+        "SELECT id FROM mail WHERE tenant_id = %s AND id = ANY(%s) ORDER BY received_at DESC, id DESC LIMIT 1",
+        (tenant, ids),
+    ).fetchone()
+    return row[0] if row else None
+
+
+def _facts(conn, tenant: str, agent_id: str) -> list[str]:
+    rows = conn.execute(
+        """
+        SELECT body FROM memory
+        WHERE tenant_id = %s AND agent_id = %s AND kind IN ('fact', 'summary') AND NOT flagged
+          AND (expires_at IS NULL OR expires_at > now())
+        ORDER BY created_at, id
+        """,
+        (tenant, agent_id),
+    ).fetchall()
+    return [row[0] for row in rows]
 
 
 def _deny(conn, bound: Bound, name: str, reason: str) -> Finished:

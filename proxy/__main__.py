@@ -19,6 +19,8 @@ def main() -> None:
         mode=mode,
         name=os.environ.get("PROXY_NAME", "proxy"),
         upstream=upstream,
+        provider_tpm=int(os.environ["PROVIDER_TPM"]) if os.environ.get("PROVIDER_TPM") else None,
+        provider_rpm=int(os.environ["PROVIDER_RPM"]) if os.environ.get("PROVIDER_RPM") else None,
     )
 
     class Handler(BaseHTTPRequestHandler):
@@ -28,10 +30,13 @@ def main() -> None:
         def do_POST(self):
             self._reply()
 
+        def do_CONNECT(self):
+            self._reply()
+
         def _reply(self):
             length = int(self.headers.get("Content-Length", "0"))
             raw = self.rfile.read(length) if length else b""
-            status, payload = dispatch(ctx, self.command, self.path, raw, self.client_address[0])
+            status, payload = dispatch(ctx, self.command, self.path, raw, self.client_address[0], self.headers)
             body = json.dumps(payload).encode()
             self.send_response(status)
             self.send_header("Content-Type", "application/json")

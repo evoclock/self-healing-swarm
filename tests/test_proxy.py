@@ -319,3 +319,33 @@ def test_journal_writes_started_then_completed_and_denial():
             "SELECT event, detail->>'reason' FROM audit_log WHERE tenant_id = 't-a' ORDER BY id DESC LIMIT 1"
         ).fetchone()
     assert event == ("policy_denied", "connect")
+
+
+def test_the_reservation_is_an_upper_bound_on_the_real_charge():
+    from proxy.providers import OUTPUT_CAP, PRICES, prompt_token_ceiling, reserve_cost, settle_cost
+
+    messages = [{"role": "user", "content": "héllo wörld " * 50}]
+    reserved = reserve_cost(messages, [], "primary")
+    price_in, price_out = PRICES["zai/glm-5.3-flash"]
+    worst = prompt_token_ceiling(messages, []) * price_in + OUTPUT_CAP * price_out
+    assert reserved >= worst
+    assert settle_cost("primary", 10, 5, None) == 10 * price_in + 5 * price_out
+    assert settle_cost("primary", 10, 5, Decimal("0.5")) == Decimal("0.5")
+
+
+def test_replay_finds_a_document_recording_made_before_every_line_was_quoted(tmp_path):
+    from agent.prompts import doc_prompt
+    from proxy.providers import Cassette, Completion, step_digest
+
+    document = {"id": "doc-b-budget", "body": "item,amount\nrent,1200\n"}
+    new = doc_prompt("Sum it.", document, "1200")
+    old = [new[0], {"role": "user", "content": "> doc-b-budget\nitem,amount\nrent,1200\n\npy.exec total 1200"}]
+    cassette = Cassette(tmp_path)
+    cassette.put(step_digest(old, []), Completion("recorded", 1, 1, None).to_json())
+    assert Completion.from_json(cassette.lookup(new, [])).text == "recorded"
+    other = [new[0], {"role": "user", "content": "> doc-b-budget\n> item,amount\n> rent,9999\n> \npy.exec total 9999"}]
+    try:
+        cassette.lookup(other, [])
+        raise AssertionError("different text must miss")
+    except ReplayMiss:
+        pass

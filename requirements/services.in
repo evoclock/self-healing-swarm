@@ -1,0 +1,4 @@
+psycopg[binary]==3.2.10
+pyyaml==6.0.2
+openai==3.32.0
+pytest==9.1.1

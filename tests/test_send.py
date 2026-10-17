@@ -4,7 +4,7 @@ import os
 import psycopg
 import pytest
 
-from outbox.send import ApproverRefused, approve, create_draft, deliver, fetch_draft
+from outbox.send import ApproverRefused, FlaggedNeedsReview, approve, approve_flagged, create_draft, deliver, fetch_draft
 
 URL = os.environ["DATABASE_URL"]
 
@@ -45,7 +45,10 @@ def test_external_draft_is_flagged_and_double_send_delivers_once():
         assert draft["flagged"] is True
         assert draft["flag_reasons"] == ["external"]
         assert draft["state"] == "DRAFT"
-        approved = approve(conn, "t-a", "draft-ext", "approver-a")
+        with pytest.raises(FlaggedNeedsReview):
+            approve(conn, "t-a", "draft-ext", "approver-a")
+        assert fetch_draft(conn, "draft-ext")["state"] == "DRAFT"
+        approved = approve_flagged(conn, "t-a", "draft-ext", "approver-a")
         assert approved["state"] == "APPROVED"
         first = deliver(conn, "t-a", "draft-ext", sink)
         second = deliver(conn, "t-a", "draft-ext", sink)
@@ -88,3 +91,12 @@ def test_approver_from_another_tenant_is_refused():
         )
         with pytest.raises(ApproverRefused):
             approve(conn, "t-a", "draft-local", "approver-b")
+
+
+def test_flagged_approval_still_needs_an_approver_in_the_tenant():
+    with psycopg.connect(URL, autocommit=True) as conn:
+        setup_approvers(conn)
+        create_draft(conn, "t-a", "draft-ext", "outside@evil.example", "files", "x")
+        with pytest.raises(ApproverRefused):
+            approve_flagged(conn, "t-a", "draft-ext", "approver-b")
+        assert fetch_draft(conn, "draft-ext")["state"] == "DRAFT"
