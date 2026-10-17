@@ -269,7 +269,9 @@ def _model(client, config: AgentConfig, messages, step_no: int) -> tuple[str | N
                 throttles += 1
             action, nxt = after_provider_pressure(errors, throttles if status == 429 else 0, config.models, model)
             if action == "backoff":
-                delay = throttle_delay(throttles, client.uniform, result.get("retry_after_s"))
+                # The proxy's own quota 429 is our fairness throttle: its Retry-After is informational only.
+                hint = None if result.get("error") == "quota" else result.get("retry_after_s")
+                delay = throttle_delay(throttles, client.uniform, hint)
                 detail = {"model": model, "attempt": throttles, "delay_s": round(delay, 3)}
                 if result.get("retry_after_s") is not None:
                     detail["retry_after_s"] = result.get("retry_after_s")

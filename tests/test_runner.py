@@ -504,6 +504,13 @@ def test_retry_after_lengthens_the_wait_and_is_capped_at_sixty_seconds():
     assert slept == [5.0, 60.0]
 
 
+def test_proxy_quota_429_retry_after_does_not_drive_the_wait():
+    fake = Fake([{"status": 429, "error": "quota", "retry_after_s": 59}, {"status": 429, "error": "quota", "retry_after_s": 58}, {"status": 200, "text": "ok"}])
+    slept = []
+    execute(fake, config(), "run-quota-ra", "brief", sleep=slept.append, uniform=lambda low, high: high)
+    assert slept == [0.5, 1.0]
+
+
 def test_backoff_wins_when_retry_after_is_shorter():
     from agent.loop import throttle_delay
 
