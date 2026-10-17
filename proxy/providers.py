@@ -64,6 +64,34 @@ def settle_cost(model: str, tokens_in: int, tokens_out: int, reported: Decimal |
     return tokens_in * price_in + tokens_out * price_out
 
 
+class ProviderThrottled(Exception):
+    """An upstream 429, after the SDK (max_retries=0) gave up at once. Carries Merge's error code and Retry-After."""
+
+    def __init__(self, code: str, retry_after_s: float | None):
+        super().__init__(code)
+        self.code = code
+        self.retry_after_s = retry_after_s
+
+
+def throttled_from(exc) -> ProviderThrottled:
+    response = getattr(exc, "response", None)
+    retry_after = None
+    code = "rate_limited"
+    if response is not None:
+        try:
+            retry_after = float(response.headers.get("retry-after"))
+        except (TypeError, ValueError):
+            retry_after = None
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        error = body.get("error", body)
+        if isinstance(error, dict) and error.get("code"):
+            code = str(error["code"])
+        elif body.get("code"):
+            code = str(body["code"])
+    return ProviderThrottled(code, retry_after)
+
+
 class ReplayMiss(Exception):
     def __init__(self, digest: str):
         self.digest = digest
@@ -275,9 +303,10 @@ def gateway_upstream(api_key: str, client=None, clients=None):
                 opened[model] = OpenAI(
                     base_url=os.environ.get("LOCAL_BASE_URL", LOCAL_BASE_URL),
                     api_key="local",
+                    max_retries=0,
                 )
             else:
-                opened[model] = OpenAI(base_url=GATEWAY_BASE_URL, api_key=api_key)
+                opened[model] = OpenAI(base_url=GATEWAY_BASE_URL, api_key=api_key, max_retries=0)
         return opened[model]
 
     def complete(messages, tools, model: str, temperature=None, max_tokens=None, project_id=None, trace=None) -> Completion:
@@ -298,11 +327,18 @@ def gateway_upstream(api_key: str, client=None, clients=None):
             kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
         elif headers:
             kwargs["extra_headers"] = headers
+        try:
+            from openai import RateLimitError
+        except ImportError:
+            RateLimitError = ()
         completions = client_for(model).chat.completions
         raw_create = getattr(getattr(completions, "with_raw_response", None), "create", None)
-        if raw_create is None:
-            return completion_from_chat(completions.create(**kwargs))
-        raw = raw_create(**kwargs)
+        try:
+            if raw_create is None:
+                return completion_from_chat(completions.create(**kwargs))
+            raw = raw_create(**kwargs)
+        except RateLimitError as exc:
+            raise throttled_from(exc) from None
         parsed = completion_from_payload(json.loads(raw.text, parse_float=Decimal))
         request_id = _trace_value(raw.headers.get("x-request-id") or "", 128)
         if request_id is None:

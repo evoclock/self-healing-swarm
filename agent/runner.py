@@ -5,7 +5,18 @@ from contextlib import contextmanager
 
 import random
 
-from agent.loop import after_hang, after_provider_pressure, after_tool_error, backoff_delay, is_loop, stop_with_progress
+from agent.loop import (
+    GATEWAY_DAILY_LIMIT,
+    after_daily_limit,
+    after_hang,
+    after_provider_pressure,
+    after_tool_error,
+    is_loop,
+    stop_with_progress,
+    throttle_delay,
+)
+
+GATEWAY_MODELS = frozenset({"primary"})
 from agent.prompts import brief_prompt, doc_prompt, external_recipient
 from agent.tools import py_exec, sheet_total
 from proxy.providers import OUTPUT_CAP, prompt_tokens
@@ -242,6 +253,15 @@ def _model(client, config: AgentConfig, messages, step_no: int) -> tuple[str | N
             kind, artifact = stop_with_progress("STOPPED_BUDGET", "saved progress")
             client.state(kind, artifact)
             return None, kind
+        if status == 429 and result.get("error") == GATEWAY_DAILY_LIMIT:
+            action, nxt = after_daily_limit(config.models, GATEWAY_MODELS)
+            client.event("provider_daily_limit", {"model": model, "action": action, "next": nxt})
+            if action == "escalate" or nxt == model:
+                client.state("ESCALATED", "provider_daily_limit")
+                return None, "ESCALATED"
+            model = nxt
+            errors = throttles = 0
+            continue
         if status in (503, 429):
             if status == 503:
                 errors += 1
@@ -249,8 +269,11 @@ def _model(client, config: AgentConfig, messages, step_no: int) -> tuple[str | N
                 throttles += 1
             action, nxt = after_provider_pressure(errors, throttles if status == 429 else 0, config.models, model)
             if action == "backoff":
-                delay = backoff_delay(throttles, client.uniform)
-                client.event("provider_backoff", {"model": model, "attempt": throttles, "delay_s": round(delay, 3)})
+                delay = throttle_delay(throttles, client.uniform, result.get("retry_after_s"))
+                detail = {"model": model, "attempt": throttles, "delay_s": round(delay, 3)}
+                if result.get("retry_after_s") is not None:
+                    detail["retry_after_s"] = result.get("retry_after_s")
+                client.event("provider_backoff", detail)
                 client.sleep(delay)
             elif action == "fallback":
                 client.event("provider_fallback", {"model": nxt, "simulated": bool(result.get("simulated"))})

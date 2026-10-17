@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 from proxy.app import Call, decide, finish_step, resolve, write_denial
 from runtime.runs import LEASE_SECONDS
 from proxy.gate import Bound, Finished, admit_tool, claim_step, finish_state, load_bound, quota_reserve, quota_settle, write_event
-from proxy.providers import Cassette, KNOWN_MODELS, Provider, ReplayMiss, PROVIDER_OF, UnknownPrice, merge_trace_headers, reserve_cost, reserve_tokens, settle_cost, recorded_cost, step_digest
+from proxy.providers import Cassette, KNOWN_MODELS, Provider, ProviderThrottled, ReplayMiss, PROVIDER_OF, UnknownPrice, merge_trace_headers, reserve_cost, reserve_tokens, settle_cost, recorded_cost, step_digest
 
 
 @dataclass
@@ -71,6 +71,10 @@ def complete(ctx: ProxyContext, conn, payload: dict, source_ip: str) -> tuple[in
     fault = _pop_fault(ctx, model)
     if fault:
         write_event(conn, tenant, run_id, "provider_" + fault, {"simulated": True, "model": model})
+        if fault == "429_daily":
+            # Merge's free-plan cap: Retry-After is the seconds to the next UTC day.
+            _note(ctx, f"complete 429 trace {tenant}.{run_id} {model} fault {fault}")
+            return 429, {"error": "free_tier_daily_limit", "retry_after_s": 3600, "simulated": True, "model": model}
         status = 429 if fault == "429" else 503
         _note(ctx, f"complete {status} trace {tenant}.{run_id} {model} fault {fault}")
         return status, {"error": fault, "simulated": True, "model": model}
@@ -109,7 +113,7 @@ def complete(ctx: ProxyContext, conn, payload: dict, source_ip: str) -> tuple[in
             finish_step(conn, tenant, run_id, step_no, digest, "FAILED", {"error": "quota"}, claimed.claim, (0, 0, Decimal(0)))
             write_event(conn, tenant, run_id, "quota_throttled", {"step_no": step_no, "model": model})
             _note(ctx, f"complete 429 trace {tenant}.{run_id} step {step_no} {model} quota")
-            return 429, {"error": "quota", "model": model}
+            return 429, {"error": "quota", "model": model, "retry_after_s": seconds_to_next_minute(conn)}
     trace = None
     if ctx.mode != "replay" and model != "local":
         parent = ctx.parents.get((tenant, run_id))
@@ -119,6 +123,14 @@ def complete(ctx: ProxyContext, conn, payload: dict, source_ip: str) -> tuple[in
         with heartbeat(ctx, bound):
             completion = _provider(ctx).complete(messages, tools, model, project_id=bound.project_id, trace=trace)
         actual = completion.tokens_in + completion.tokens_out
+    except ProviderThrottled as exc:
+        finish_step(conn, tenant, run_id, step_no, digest, "FAILED", {"error": exc.code}, claimed.claim, (0, 0, Decimal(0)))
+        write_event(conn, tenant, run_id, "provider_throttled", {"step_no": step_no, "model": model, "code": exc.code})
+        _note(ctx, f"complete 429 trace {tenant}.{run_id} step {step_no} {model} upstream {exc.code}")
+        body = {"error": exc.code, "model": model}
+        if exc.retry_after_s is not None:
+            body["retry_after_s"] = exc.retry_after_s
+        return 429, body
     except ReplayMiss as exc:
         finish_step(conn, tenant, run_id, step_no, digest, "FAILED", {"error": "replay_miss"}, claimed.claim)
         _note(ctx, _complete_line(409, tenant, run_id, step_no, model, {"error": "replay_miss"}, charge))
@@ -289,6 +301,12 @@ def _complete_line(status, tenant, run_id, step_no, model, body, charge) -> str:
     elif body.get("error"):
         parts.append(str(body["error"]))
     return " ".join(parts)
+
+
+def seconds_to_next_minute(conn) -> int:
+    """Retry-After for a quota 429: the bucket refills at the next minute."""
+    second = conn.execute("SELECT extract(epoch FROM now())::float").fetchone()[0] % 60
+    return max(1, int(60 - second + 0.999))
 
 
 def _pop_fault(ctx: ProxyContext, model: str) -> str | None:
