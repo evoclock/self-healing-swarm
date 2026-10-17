@@ -126,7 +126,7 @@ From recorded runs (`docs/cost.md`): the daily brief is $0.00006144 a run and th
 - Design doc: `docs/design.pdf` (2 pages), text in `docs/design.md`.
 - Drill output: `docs/drill-output.txt`, written by `make drill`.
 - Cost: `docs/cost.md`.
-- Video: [docs/demo.mp4](docs/demo.mp4), a narrated walkthrough (about 4 minutes) of `make clean`, `make test`, `make drill` and `make record` with the proxy logs alongside.
+- Video: [docs/demo.mp4](docs/demo.mp4), a narrated walkthrough (about 3 minutes) of `make test`, `make drill`, `make record` and `make evals` with the proxy logs alongside.
 
 ## Prerequisites
 
