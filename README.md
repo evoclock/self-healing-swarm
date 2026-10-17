@@ -97,6 +97,7 @@ Every agent scenario runs in a fresh locked agent container, against proxy-a.
 - `proxies`: both proxies answer health with different names.
 - `kill`: a container finishes steps 1 and 2 and is killed. Its lease lapses and `watch_once` claims the run, so `resume_count` is 1. It starts a fresh container and binds a second token at a new generation. The resumed run skips the completed steps, keeps their costs, and succeeds.
 - `provider`: the armed faults return 503 and then four 429s. The runner backs off three times (`provider_backoff`), then falls back to `local` and logs `provider_fallback` marked simulated.
+- `daily_limit`: the armed fault returns a 429 with code `free_tier_daily_limit`. The runner does not back off or try another Gateway model; it logs `provider_daily_limit`, switches to `local`, and the run succeeds.
 - `injection`: the injection mail produces a flagged draft, ordinary approval refuses it, the run succeeds, and the proxy writes one cursor.
 - `escape`: four checks.
   - The drill posts a `py.exec` request containing code to write a marker under the proxy's `/src` and print `/etc/shadow`. The scenario requires `not_executed`, no shadow text in the response, and no marker file afterwards.
