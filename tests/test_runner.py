@@ -3,7 +3,7 @@ import subprocess
 from agent.client import ProxyClient
 from agent.loop import after_provider_pressure
 from agent.prompts import external_recipient
-from agent.runner import execute
+from agent.runner import execute, strip_code_fence
 from agent.tools import SHEET_PROGRAM
 from proxy.providers import OUTPUT_CAP
 from runtime.citations import parse_cites
@@ -116,6 +116,24 @@ def test_brief_ends_with_a_cites_line_and_does_not_write_the_cursor():
     assert state == "SUCCEEDED"
     assert parse_cites(artifact) == ("m-a-1",)
     assert not any(name == "memory.write" for name, _args in fake.tools)
+
+
+def test_brief_strips_a_json_code_fence_before_storing():
+    reply = '```json\n{"cited_ids": ["m-a-1"], "draft": null, "text": "Ship it (m-a-1)."}\n```'
+    fake = Fake([{"status": 200, "text": reply}])
+    execute(fake, config(), "run-fence", "brief")
+    state, artifact = fake.states[-1]
+    assert state == "SUCCEEDED"
+    assert artifact.startswith('{"cited_ids"')
+    assert "```" not in artifact
+    assert parse_cites(artifact) == ("m-a-1",)
+
+
+def test_strip_code_fence_leaves_unfenced_text_alone():
+    assert strip_code_fence('{"text": "x"}') == '{"text": "x"}'
+    assert strip_code_fence("```\n{}\n```") == "{}"
+    assert strip_code_fence("brief with ``` inside") == "brief with ``` inside"
+    assert strip_code_fence(None) is None
 
 
 def test_document_sums_on_stdin_and_cites_the_document():

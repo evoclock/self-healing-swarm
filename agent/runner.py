@@ -17,6 +17,22 @@ NO_NEW_MAIL = "no new mail"
 HEARTBEAT_S = 5.0
 
 
+def strip_code_fence(text):
+    """Drop one Markdown code fence (```json ... ```) wrapped around a whole model reply, so the stored brief is plain JSON."""
+    if not text:
+        return text
+    stripped = text.strip()
+    if not (stripped.startswith("```") and stripped.endswith("```")) or len(stripped) < 6:
+        return text
+    body = stripped[3:-3]
+    first, _sep, rest = body.partition("\n")
+    if _sep and first.strip() and " " not in first.strip():
+        body = rest
+    elif not _sep:
+        return text
+    return body.strip()
+
+
 @contextmanager
 def local_work(client, interval: float = HEARTBEAT_S):
     """Heartbeat to the proxy every `interval` seconds while the agent works locally, so the lease renews."""
@@ -194,6 +210,7 @@ def _brief(client, config: AgentConfig, run_id: str, base: int = 0) -> dict:
             },
             base + 4,
         )
+    text = strip_code_fence(text)
     cited = tuple(message["id"] for message in messages)
     artifact = (text or "Brief") + "\n" + cites_line(cited)
     stored = client.state("SUCCEEDED", artifact)
