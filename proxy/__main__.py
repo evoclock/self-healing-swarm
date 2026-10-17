@@ -34,7 +34,7 @@ def main() -> None:
         def _reply(self):
             length = int(self.headers.get("Content-Length", "0"))
             raw = self.rfile.read(length) if length else b""
-            status, payload = dispatch(ctx, self.command, self.path, raw, self.client_address[0], dict(self.headers))
+            status, payload = dispatch(ctx, self.command, self.path, raw, self.client_address[0], self.headers)
             body = json.dumps(payload).encode()
             self.send_response(status)
             self.send_header("Content-Type", "application/json")

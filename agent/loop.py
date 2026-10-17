@@ -35,9 +35,12 @@ def after_provider_pressure(errors_in_window: int, throttles: int, models: tuple
     return ("stay", current)
 
 
-def backoff_delay(attempt: int, uniform, base: float = 0.5) -> float:
-    """Exponential backoff with jitter: attempt n waits between half and all of base * 2**(n-1)."""
-    ceiling = base * 2 ** (attempt - 1)
+BACKOFF_CAP_S = 8.0
+
+
+def backoff_delay(attempt: int, uniform, base: float = 0.5, cap: float = BACKOFF_CAP_S) -> float:
+    """Exponential backoff with jitter: attempt n waits between half and all of base * 2**(n-1), capped at 8 s."""
+    ceiling = min(cap, base * 2 ** (attempt - 1))
     return uniform(ceiling / 2, ceiling)
 
 

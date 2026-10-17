@@ -184,6 +184,7 @@ def test_missing_cites_line_stores_failed(tmp_path):
 
 
 def test_own_citation_succeeds_and_the_cursor_is_written_with_the_state(tmp_path):
+    _clear_memory()  # the cursor only moves forward, so start without one
     token = opened("gate-cite-own")
     status, body = post(context(tmp_path), "/v1/state", {"token": token, "state": "SUCCEEDED", "artifact": "Brief\ncites: m-a-1 m-a-2"})
     assert (status, body["state"]) == (200, "SUCCEEDED")
@@ -485,3 +486,22 @@ def test_heartbeat_renews_the_lease(tmp_path):
     status, body = post(context(tmp_path), "/v1/heartbeat", {"token": token})
     assert (status, body) == (200, {"ok": True})
     assert query("t-a", "SELECT lease_until > now() FROM runs WHERE id = 'gate-heartbeat'") == [(True,)]
+
+
+def test_the_cursor_never_moves_backwards(tmp_path):
+    _clear_memory()
+    ahead = opened("gate-cur-ahead")
+    post(context(tmp_path), "/v1/state", {"token": ahead, "state": "SUCCEEDED", "artifact": "Brief\ncites: m-a-3"})
+    behind = opened("gate-cur-behind")
+    status, body = post(context(tmp_path), "/v1/state", {"token": behind, "state": "SUCCEEDED", "artifact": "Brief\ncites: m-a-1"})
+    assert (status, body["state"]) == (200, "SUCCEEDED")
+    cursors = query("t-a", "SELECT body FROM memory WHERE tenant_id = 't-a' AND agent_id = 'daily-brief' AND kind = 'cursor'")
+    assert cursors == [("m-a-3",)]
+    _clear_memory()
+
+
+def test_forward_header_name_is_case_insensitive_and_audited(tmp_path):
+    token = opened("gate-forward-lower")
+    status, body = dispatch(context(tmp_path), "CONNECT", "example.com:443", b"", IP, {"x-run-token": token})
+    assert (status, body) == (403, {"denied": True, "reason": "connect"})
+    assert query("t-a", "SELECT detail->>'reason' FROM audit_log WHERE detail->>'run_id' = 'gate-forward-lower'") == [("connect",)]

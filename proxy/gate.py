@@ -228,6 +228,8 @@ def finish_state(conn, bound: Bound, state: str, artifact: str) -> Finished:
                 state = "FAILED"
             else:
                 cursor = _latest(conn, tenant, [item for item in cited if item in mail_ids])
+                if cursor is not None and not _is_after_cursor(conn, tenant, agent_id, cursor):
+                    cursor = None  # the cursor only moves forward by (received_at, id)
         try:
             nxt = transition(current, state)
         except IllegalTransition as exc:
@@ -261,6 +263,22 @@ def _mail_after_cursor(conn, tenant: str, agent_id: str) -> list:
         """,
         (tenant, agent_id, tenant),
     ).fetchall()
+
+
+def _is_after_cursor(conn, tenant: str, agent_id: str, mail_id: str) -> bool:
+    row = conn.execute(
+        """
+        SELECT NOT EXISTS (
+            SELECT 1 FROM memory k
+            JOIN mail c ON c.id = k.body AND c.tenant_id = k.tenant_id
+            JOIN mail m ON m.id = %s AND m.tenant_id = k.tenant_id
+            WHERE k.tenant_id = %s AND k.agent_id = %s AND k.kind = 'cursor'
+              AND (c.received_at, c.id) >= (m.received_at, m.id)
+        )
+        """,
+        (mail_id, tenant, agent_id),
+    ).fetchone()
+    return bool(row[0])
 
 
 def _latest(conn, tenant: str, ids: list) -> str | None:

@@ -58,6 +58,7 @@ class Placement:
     start: int
     escalated: bool
     duration: int
+    reason: str = ""
 
 
 def load_config(config, promoted: set[str]):
@@ -79,7 +80,8 @@ def schedule(
 
     provider_tpm splits each provider's tokens per minute evenly across the tenants that use it: each tenant
     has a token bucket refilled with its share every minute, and a job starts only if its bucket covers its tokens.
-    A job is escalated only when it can no longer finish by its deadline (or the window end).
+    A job whose tokens exceed its tenant's per-minute share can never start; it escalates at once, reason 'quota'.
+    Otherwise a job is escalated only when it can no longer finish by its deadline (or the window end).
     """
     provider_caps = provider_caps or {}
     provider_tpm = provider_tpm or {}
@@ -97,8 +99,13 @@ def schedule(
         if minute:
             buckets = {key: share[key] for key in share}
         for job in list(pending):
+            key = (job.provider, job.tenant_id)
+            if key in share and job.tokens > share[key]:
+                placed.append(Placement(job.job_id, job.tenant_id, -1, True, job.duration, "quota"))
+                pending.remove(job)
+                continue
             if minute + job.duration > min(job.deadline, window):
-                placed.append(Placement(job.job_id, job.tenant_id, -1, True, job.duration))
+                placed.append(Placement(job.job_id, job.tenant_id, -1, True, job.duration, "deadline"))
                 pending.remove(job)
                 continue
             if len(running) >= host_cap:
@@ -108,7 +115,6 @@ def schedule(
             cap = provider_caps.get(job.provider)
             if cap is not None and sum(1 for _end, other in running if other.provider == job.provider) >= cap:
                 continue
-            key = (job.provider, job.tenant_id)
             if key in buckets:
                 if buckets[key] < job.tokens:
                     continue
@@ -119,5 +125,5 @@ def schedule(
         if not pending:
             break
     for job in pending:
-        placed.append(Placement(job.job_id, job.tenant_id, -1, True, job.duration))
+        placed.append(Placement(job.job_id, job.tenant_id, -1, True, job.duration, "deadline"))
     return tuple(placed)

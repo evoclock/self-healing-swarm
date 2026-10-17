@@ -68,6 +68,9 @@ class ProxyClient:
     def forward(self, method: str, target: str) -> dict:
         """Use the proxy as a forward proxy (CONNECT host:port or an absolute URL). The proxy refuses these."""
         parsed = urllib.parse.urlsplit(self.base_url)
+        # The proxy is plain HTTP on the internal agent network; there is no TLS hop to it.
+        if parsed.scheme != "http":
+            raise ValueError(f"forward() needs an http:// proxy URL, got {parsed.scheme}")
         conn = http.client.HTTPConnection(parsed.hostname, parsed.port or 80, timeout=30)
         try:
             conn.request(method, target, headers={"X-Run-Token": self.token})

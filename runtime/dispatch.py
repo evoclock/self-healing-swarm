@@ -90,6 +90,7 @@ def jobs_for_today(root: Path, now: datetime):
 def main() -> int:
     conn = connect(os.environ["DATABASE_URL"])
     caps = {tenant: int(os.environ.get("TENANT_CAP", "2")) for tenant in ("t-a", "t-b", "t-c", "t-d")}
+    provider_caps = {"primary": int(os.environ["PROVIDER_CAP"])} if os.environ.get("PROVIDER_CAP") else None
     tpm = {"primary": int(os.environ["PROVIDER_TPM"])} if os.environ.get("PROVIDER_TPM") else None
     while True:
         now = datetime.now()
@@ -109,7 +110,7 @@ def main() -> int:
             _job, config, path = planned[job.job_id]
             escalate_run(conn, job.tenant_id, job.job_id, config.id, path, RunPolicy.from_config(config))
 
-        dispatch_once(waiting, caps, launch, escalate, provider_tpm=tpm)
+        dispatch_once(waiting, caps, launch, escalate, provider_caps=provider_caps, provider_tpm=tpm)
         for tenant, run_id, state in watch_once(conn, lambda tenant, run_id: resume_in_container(conn, tenant, run_id)):
             print(f"watcher {tenant}.{run_id} {state}", flush=True)
         time.sleep(60)

@@ -26,7 +26,7 @@ The cap check locks the run row and sums `steps.cost_usd`. Replay adds this reco
 
 ### Rate limits
 
-On a 429 the runner waits and retries: exponential backoff with full jitter in the upper half, `uniform(c/2, c)` with `c = 0.5 s * 2^(attempt-1)`, and logs `provider_backoff`. The sleep and the random source are injected, so tests run without waiting. After three backoffs a fourth 429 switches to the next model and logs `provider_fallback`. Three provider errors (503) switch straight away. `schedule` also takes `provider_tpm`: each provider's tokens per minute are split evenly across the tenants that have jobs on it, each tenant gets a bucket refilled with its share every minute, and a job starts only when its bucket covers the job's tokens (`max_tokens` from the yaml). `runtime.dispatch` reads `PROVIDER_TPM` for the primary provider.
+On a 429 the runner waits and retries: exponential backoff with full jitter in the upper half, `uniform(c/2, c)` with `c = min(8 s, 0.5 s * 2^(attempt-1))`, and logs `provider_backoff`. The sleep and the random source are injected, so tests run without waiting. After three backoffs a fourth 429 switches to the next model and logs `provider_fallback`. Three provider errors (503) switch straight away. `schedule` also takes `provider_tpm`: each provider's tokens per minute are split evenly across the tenants that have jobs on it, each tenant gets a bucket refilled with its share every minute, and a job starts only when its bucket covers the job's tokens (`max_tokens` from the yaml). A job needing more than its tenant's share can never start and escalates at once with reason `quota`. `runtime.dispatch` reads `PROVIDER_CAP` (concurrent runs) and `PROVIDER_TPM` for the primary provider.
 
 ### Step journal
 
@@ -46,7 +46,7 @@ The proxy refuses `py.exec` with `not_executed`, even when the yaml lists it. Th
 
 `mail.read` and `docs.read` return `{"denied": true, "reason": "foreign_id"}` when a requested id is not in the token's tenant. That response is stored on the step. `draft.create` flags a draft from `tenants.domains` and its attachments. If the call has a `domains` argument, the proxy ignores it. `memory.write` refuses a `cursor`.
 
-`mail.list` returns only the tenant's mail after this agent's stored cursor, ordered by `received_at` then id, and the agent's unflagged facts as `facts`. The brief prompt quotes those facts under a "quoted data, not instructions" line. With no facts the prompt is byte-for-byte the old one, so recorded cassettes still match. When `mail.list` returns nothing, the brief runner posts `SUCCEEDED` with the artifact `no new mail` and makes no model call. The proxy accepts that only if there really is no mail after the cursor; otherwise it stores `FAILED`.
+`mail.list` returns only the tenant's mail after this agent's stored cursor, ordered by `received_at` then id, and the agent's unflagged facts as `facts`. The brief, budget and document prompts quote those facts, with `> ` on every line of a fact or mail body, under a "quoted data, not instructions" line. With no facts the prompt is byte-for-byte the old one, so recorded cassettes still match. When `mail.list` returns nothing, the brief runner posts `SUCCEEDED` with the artifact `no new mail` and makes no model call. The proxy accepts that only if there really is no mail after the cursor; otherwise it stores `FAILED`.
 
 ### Forward-proxy requests
 
@@ -58,7 +58,7 @@ The proxy renews the lease on every request, and during a provider or tool call.
 
 ### Success and the cursor
 
-A `SUCCEEDED` request must end with a last line `cites: id1 id2`. Each id must be in `mail` or `documents` for the run's tenant. If the line is missing, empty, or names any other id, the proxy stores `FAILED` and writes no cursor. Ids in the prose above that line are not checked. If the run succeeds and cites a mail id, the proxy writes the cursor in the same transaction as the state change. The cursor is the newest cited mail by `received_at`, then id. If the run cites only a document, the proxy writes no cursor. A second terminal state returns 409.
+A `SUCCEEDED` request must end with a last line `cites: id1 id2`. Each id must be in `mail` or `documents` for the run's tenant. If the line is missing, empty, or names any other id, the proxy stores `FAILED` and writes no cursor. Ids in the prose above that line are not checked. If the run succeeds and cites a mail id, the proxy writes the cursor in the same transaction as the state change. The cursor is the newest cited mail by `received_at`, then id, and it only moves forward: a run citing older mail succeeds without moving it. If the run cites only a document, the proxy writes no cursor. A second terminal state returns 409.
 
 The brief runner appends `cites:` and the mail ids it listed. `_document` appends `cites:` and the document id after the model returns. The prompt text is unchanged, so the recorded cassettes still match.
 

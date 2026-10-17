@@ -29,7 +29,7 @@ class ProxyContext:
 def dispatch(ctx: ProxyContext, method: str, path: str, raw: bytes, source_ip: str, headers: dict | None = None) -> tuple[int, dict]:
     if method == "CONNECT" or path.startswith(("http://", "https://")):
         with psycopg.connect(ctx.database_url, autocommit=True) as conn:
-            return forward(ctx, conn, method, path, (headers or {}).get("X-Run-Token", ""), source_ip)
+            return forward(ctx, conn, method, path, _header(headers, "x-run-token"), source_ip)
     if method == "GET" and path == "/health":
         return 200, {"ok": True, "name": ctx.name, "mode": ctx.mode}
     if method == "GET" and path == "/whoami":
@@ -166,6 +166,14 @@ def add_event(ctx: ProxyContext, conn, payload: dict, source_ip: str) -> tuple[i
     write_event(conn, bound.tenant_id, bound.run_id, payload["event"], payload.get("detail") or {})
     _note(ctx, f"event trace {bound.tenant_id}.{bound.run_id} {payload['event']}")
     return 200, {"ok": True}
+
+
+def _header(headers, name: str) -> str:
+    """Header lookup ignoring case (HTTP header names are case-insensitive)."""
+    for key, value in (headers or {}).items():
+        if key.lower() == name:
+            return value
+    return ""
 
 
 def forward(ctx: ProxyContext, conn, method: str, target: str, token: str, source_ip: str) -> tuple[int, dict]:

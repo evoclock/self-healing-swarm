@@ -1,3 +1,4 @@
+import sys
 import threading
 import time
 from contextlib import contextmanager
@@ -25,8 +26,8 @@ def local_work(client, interval: float = HEARTBEAT_S):
         while not stop.wait(interval):
             try:
                 client.heartbeat()
-            except Exception:  # a missed beat only shortens the lease; the next one retries
-                pass
+            except Exception as exc:  # a missed beat only shortens the lease; the next one retries
+                print(f"heartbeat failed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
 
     thread = threading.Thread(target=beat, daemon=True)
     thread.start()
@@ -34,7 +35,7 @@ def local_work(client, interval: float = HEARTBEAT_S):
         yield
     finally:
         stop.set()
-        thread.join()
+        thread.join(timeout=interval)
 
 
 class LimitReached(Exception):
@@ -199,7 +200,7 @@ def _document(client, config: AgentConfig, run_id: str, executor) -> dict:
     attachment = next((message["attachment_id"] for message in listed.get("messages") or [] if message.get("attachment_id")), None)
     document = client.tool("docs.read", {"id": attachment}, 2).get("document") or {}
     total = sheet_total(document.get("body") or "", executor=executor)
-    text, model = _model(client, config, doc_prompt(config.instructions, document, total), 4)
+    text, model = _model(client, config, doc_prompt(config.instructions, document, total, listed.get("facts")), 4)
     if text is None:
         return {"state": model, "artifact": "", "figures": total}
     artifact = f"{text}\nfigures {total}\n{cites_line((document.get('id') or 'doc',))}"
@@ -279,7 +280,7 @@ def _budget(client, config: AgentConfig, run_id: str) -> dict:
     listed = client.tool("mail.list", {}, 1)
     messages = listed.get("messages") or []
     client.tool("mail.read", {"ids": [message["id"] for message in messages]}, 2)
-    _text, state = _model(client, config, brief_prompt(config.instructions, messages), 3)
+    _text, state = _model(client, config, brief_prompt(config.instructions, messages, listed.get("facts")), 3)
     if state == "STOPPED_BUDGET":
         return {"state": state, "artifact": "saved progress"}
     client.state("FAILED", "budget not enforced")
