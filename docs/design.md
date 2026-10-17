@@ -25,7 +25,7 @@ Agents give a deadline, not a start minute, so 200 briefs due at 07:30 spread ac
 - **Provider:** requests and tokens per minute. When full, a run waits or switches model. A self-hosted model is one more provider, sized by its batch slots.
 - **Tenant:** each tenant has a concurrency limit, and it says how many of its runs happen at once.
 - **Host:** 8 containers, each with 0.5 CPU and 512 MB of RAM.
-- **Rate limits:** runs start on the API. On a 429 the agent retries with exponential backoff and jitter, waiting at least `Retry-After` (capped at 60 s), and never retries `free_tier_daily_limit`; if throttling continues, it falls back to the next model in the config. Each provider's token and request quota is split across tenants, and runs are capped at each provider's concurrency.
+- **Rate limits:** runs start on the API. On a 429 the agent retries with exponential backoff and jitter, waiting at least an upstream `Retry-After` (capped at 60 s; the proxy's own quota 429 does not set the wait), and never retries `free_tier_daily_limit`; if throttling continues, it falls back to the next model in the config. Each provider's token and request quota is split across tenants, and runs are capped at each provider's concurrency.
 
 If the scheduler predicts a missed deadline, it escalates to a person.
 
