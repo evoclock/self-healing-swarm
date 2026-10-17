@@ -43,7 +43,7 @@ Every failure ends in one of three logged outcomes:
 
 1. **Auto-resume.** A killed worker resumes in a new container with the same `run_id` once the lease frees, skipping completed steps. Tool errors retry 3 times, then go to the model. A hang is cancelled and retried once. Three provider errors, or throttling past backoff, switch to the next model and log `provider_fallback`. Sandbox denials are logged and the run continues.
 2. **Rerun with logged cost.** A step that died while `STARTED` reruns and logs `cost_uncertain`, since the provider may have charged already.
-3. **Hand to a person.** A loop (the same call 3 times) stops as `STOPPED_LOOP`; a call that would pass a limit is skipped and the run stops as `STOPPED_BUDGET`. Both save progress first. A person also takes over after 3 resumes, when every model is down, when a retry fails again, on a third sandbox denial, or before a missed deadline.
+3. **Hand to a person.** A loop (the same call 3 times) stops as `STOPPED_LOOP`; a call that would pass a limit is skipped and the run stops as `STOPPED_BUDGET`. Both save progress first. A person also takes over on the third lease expiry (after two resumes), when every model is down, when a retry fails again, on a third sandbox denial, or before a missed deadline.
 
 
 
