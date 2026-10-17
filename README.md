@@ -8,7 +8,7 @@ Agents write drafts. An approver in the same tenant approves a send. A flagged d
 
 ## System design
 
-The interactive diagram is [docs/system-design.html](docs/system-design.html). Open that file in a browser. The paragraphs below describe the same code.
+The interactive diagram is [docs/system-design.html](docs/system-design.html), the target design from `docs/design.md`: solid boxes are built (with code references), dashed boxes are designed, not built, and a dashed badge marks partly built parts. Open that file in a browser.
 
 ### Run policy
 
