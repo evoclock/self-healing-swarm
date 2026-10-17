@@ -1,5 +1,6 @@
 import json
 from dataclasses import dataclass
+import sys
 from decimal import Decimal
 
 from outbox.send import create_draft
@@ -241,7 +242,7 @@ def finish_state(conn, bound: Bound, state: str, artifact: str) -> Finished:
         if cursor is not None:
             memory_write(conn, tenant, agent_id, "cursor", cursor, (cursor,), run_id)
         if nxt == "SUCCEEDED" and artifact.strip() != NO_NEW_MAIL:
-            memory_write(conn, tenant, agent_id, "fact", run_summary(run_id, artifact), (), run_id)
+            memory_write(conn, tenant, agent_id, "summary", run_summary(run_id, artifact), (), run_id)
         write_event(conn, tenant, run_id, "state", {"state": nxt})
     return Finished(200, {"state": nxt})
 
@@ -273,7 +274,10 @@ def quota_reserve(conn, tenant: str, provider: str, tokens: int, tpm: int | None
 
 
 def quota_settle(conn, tenant: str, provider: str, minute, reserved: int, actual: int) -> None:
-    """Replace the reservation with the tokens the provider reported: credit back the unused part."""
+    """Replace the reservation with the tokens the provider reported: credit back the unused part. The reservation
+    is a ceiling, so real use above it means the ceiling is wrong: it is logged, and the real use is still charged."""
+    if actual > reserved:
+        print(f"quota settle over reservation {tenant} {provider} reserved {reserved} actual {actual}", file=sys.stderr, flush=True)
     conn.execute("SELECT set_config('app.tenant_id', %s, false)", (tenant,))
     conn.execute(
         "UPDATE quota_minute SET tokens = GREATEST(0, tokens - %s + %s) WHERE tenant_id = %s AND provider = %s AND minute = %s",
@@ -335,7 +339,7 @@ def _facts(conn, tenant: str, agent_id: str) -> list[str]:
     rows = conn.execute(
         """
         SELECT body FROM memory
-        WHERE tenant_id = %s AND agent_id = %s AND kind = 'fact' AND NOT flagged
+        WHERE tenant_id = %s AND agent_id = %s AND kind IN ('fact', 'summary') AND NOT flagged
           AND (expires_at IS NULL OR expires_at > now())
         ORDER BY created_at, id
         """,

@@ -397,7 +397,7 @@ def scenario_quota() -> tuple[bool, str]:
     row, ev, _r = _run("drill-quota-meter", "t-a", "daily-brief", BRIEF, "brief", [])
     conn.execute("SELECT set_config('app.tenant_id', 't-a', false)")
     metered = conn.execute(
-        "SELECT COALESCE(sum(tokens), 0), COALESCE(sum(requests), 0) FROM quota_minute WHERE tenant_id = 't-a' AND provider = 'primary'"
+        "SELECT COALESCE(sum(tokens), 0), COALESCE(sum(requests), 0) FROM quota_minute WHERE tenant_id = 't-a' AND provider = 'gateway'"
     ).fetchone()
     used = conn.execute(
         """
@@ -409,7 +409,7 @@ def scenario_quota() -> tuple[bool, str]:
     conn.execute(
         """
         INSERT INTO quota_minute (tenant_id, provider, minute, tokens, requests)
-        SELECT 't-a', 'primary', date_trunc('minute', now()) + make_interval(mins => n), 100000000, 0
+        SELECT 't-a', 'gateway', date_trunc('minute', now()) + make_interval(mins => n), 100000000, 0
         FROM generate_series(0, 3) AS n
         ON CONFLICT (tenant_id, provider, minute) DO UPDATE SET tokens = EXCLUDED.tokens
         """

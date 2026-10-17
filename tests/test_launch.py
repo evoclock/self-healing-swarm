@@ -81,3 +81,30 @@ def test_container_gets_its_address_and_only_its_tenant_config(monkeypatch):
     assert body["HostConfig"]["Binds"] == ["/repo/agents/t-a:/src/agents/t-a:ro"]
     assert body["HostConfig"]["NetworkMode"] == "swarm-agents-t-a"
     assert body["NetworkingConfig"] == {"EndpointsConfig": {"swarm-agents-t-a": {"IPAMConfig": {"IPv4Address": "10.231.1.16"}}}}
+
+
+def test_reap_frees_exited_dead_missing_and_stale_launches_but_not_created_or_running():
+    conn = _conn()
+    states = {"c-exited": "exited", "c-dead": "dead", "c-created": "created", "c-running": "running"}
+    for n, cid in enumerate(list(states) + ["c-missing"], start=16):
+        conn.execute("INSERT INTO ip_leases (ip, tenant_id, run_id, container_id) VALUES (%s, 't-d', 'reap', %s)", (f"10.231.4.{n}", cid))
+    conn.execute("INSERT INTO ip_leases (ip, tenant_id, run_id, allocated_at) VALUES ('10.231.4.30', 't-d', 'reap', now() - interval '3 minutes')")
+    conn.execute("INSERT INTO ip_leases (ip, tenant_id, run_id) VALUES ('10.231.4.31', 't-d', 'reap')")
+
+    def inspect(cid):
+        if cid not in states:
+            raise RuntimeError("docker inspect 404")
+        return {"State": {"Status": states[cid]}}
+
+    removed = []
+    launch.remove_container = lambda cid: removed.append(cid)
+    try:
+        freed = launch.reap_exited(conn, inspect=inspect)
+    finally:
+        launch.remove_container = docker_api.remove_container
+    conn.execute("SELECT set_config('app.tenant_id', 't-d', false)")
+    left = sorted(str(row[0]) for row in conn.execute("SELECT ip FROM ip_leases WHERE tenant_id = 't-d'").fetchall())
+    assert sorted(removed) == ["c-dead", "c-exited", "c-missing"]
+    assert left == ["10.231.4.18", "10.231.4.19", "10.231.4.31"]
+    assert "10.231.4.30" in freed
+    conn.execute("DELETE FROM ip_leases WHERE tenant_id = 't-d'")

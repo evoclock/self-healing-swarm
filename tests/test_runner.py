@@ -463,3 +463,17 @@ def test_a_403_is_final_because_the_token_is_bound_before_start(monkeypatch):
     monkeypatch.setattr(client, "_send", send)
     assert client.tool("mail.list", {}, 1)["status"] == 403
     assert len(sends) == 1
+
+
+class AlwaysRacing(Racing):
+    def tool(self, name, args, step):
+        if name == "mail.list":
+            return {"messages": [], "domains": ["a.example"]}
+        return super().tool(name, args, step)
+
+
+def test_repeated_new_mail_races_end_terminal_not_running():
+    fake = AlwaysRacing([])
+    result = execute(fake, config(), "run-race-forever", "brief", Executor())
+    assert result["state"] == "STOPPED_BUDGET"
+    assert fake.states[-1][0] == "STOPPED_BUDGET" and "saved progress" in fake.states[-1][1]

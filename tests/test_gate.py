@@ -526,7 +526,7 @@ def test_quota_debits_the_real_tokens_and_credits_back_the_reservation(tmp_path)
         "token": token, "messages": [{"role": "user", "content": "meter me"}], "model": "primary", "step_no": 1,
     })
     assert status == 200
-    assert query("t-a", "SELECT tokens, requests FROM quota_minute WHERE tenant_id = 't-a' AND provider = 'primary'") == [(20, 1)]
+    assert query("t-a", "SELECT tokens, requests FROM quota_minute WHERE tenant_id = 't-a' AND provider = 'gateway'") == [(20, 1)]
     _clear_quota()
 
 
@@ -619,3 +619,67 @@ def test_one_fact_over_the_size_cap_is_refused():
             raise AssertionError("too large must be refused")
         except MemoryRefused as exc:
             assert exc.reason == "too_large"
+
+
+def test_a_provider_exception_still_settles_the_quota_reservation(tmp_path):
+    _clear_quota()
+    token = opened("gate-quota-boom")
+
+    def boom(messages, tools, model, **kwargs):
+        raise ConnectionError("gateway down")
+
+    try:
+        post(_metered(tmp_path, boom, tpm=10_000_000), "/v1/complete", {
+            "token": token, "messages": [{"role": "user", "content": "boom"}], "model": "primary", "step_no": 1,
+        })
+    except ConnectionError:
+        pass
+    assert query("t-a", "SELECT tokens, requests FROM quota_minute WHERE tenant_id = 't-a' AND provider = 'gateway'") == [(0, 1)]
+    _clear_quota()
+
+
+def test_settling_above_the_reservation_is_logged_and_charged(capsys):
+    from proxy.gate import quota_reserve, quota_settle
+
+    _clear_quota()
+    opened("gate-quota-over")
+    with psycopg.connect(URL, autocommit=True) as conn:
+        minute = quota_reserve(conn, "t-a", "gateway", 10, 10_000_000, None)
+        quota_settle(conn, "t-a", "gateway", minute, 10, 25)
+    assert "quota settle over reservation t-a gateway reserved 10 actual 25" in capsys.readouterr().err
+    assert query("t-a", "SELECT tokens FROM quota_minute WHERE tenant_id = 't-a' AND provider = 'gateway'") == [(25,)]
+    _clear_quota()
+
+
+def test_summaries_keep_their_own_last_five_and_never_evict_facts():
+    from runtime.memory import MAX_FACTS, MAX_SUMMARIES, memory_write
+
+    _clear_memory()
+    opened("gate-sum-cap")
+    with psycopg.connect(URL, autocommit=True) as conn:
+        conn.execute("SELECT set_config('app.tenant_id', 't-a', false)")
+        for n in range(MAX_FACTS):
+            memory_write(conn, "t-a", "daily-brief", "fact", f"kept fact {n:02d}", (), "gate-sum-cap")
+        for n in range(MAX_SUMMARIES + 3):
+            memory_write(conn, "t-a", "daily-brief", "summary", f"Run r{n}: summary {n}", (), f"gate-sum-{n}")
+        facts = conn.execute("SELECT count(*) FROM memory WHERE agent_id = 'daily-brief' AND kind = 'fact'").fetchone()[0]
+        summaries = [row[0] for row in conn.execute(
+            "SELECT body FROM memory WHERE agent_id = 'daily-brief' AND kind = 'summary' ORDER BY body").fetchall()]
+    assert facts == MAX_FACTS
+    assert summaries == [f"Run r{n}: summary {n}" for n in range(3, MAX_SUMMARIES + 3)]
+    _clear_memory()
+
+
+def test_an_expired_duplicate_is_stored_again_with_a_fresh_expiry():
+    from runtime.memory import memory_write
+
+    _clear_memory()
+    opened("gate-dup")
+    with psycopg.connect(URL, autocommit=True) as conn:
+        conn.execute("SELECT set_config('app.tenant_id', 't-a', false)")
+        memory_write(conn, "t-a", "daily-brief", "fact", "same text", (), "gate-dup")
+        conn.execute("UPDATE memory SET expires_at = now() - interval '1 second' WHERE body = 'same text'")
+        memory_write(conn, "t-a", "daily-brief", "fact", "same text", (), "gate-dup")
+        rows = conn.execute("SELECT expires_at > now() FROM memory WHERE body = 'same text'").fetchall()
+    assert rows == [(True,)]
+    _clear_memory()

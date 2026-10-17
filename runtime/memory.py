@@ -5,6 +5,9 @@ MAX_FACTS = 20
 MAX_FACT_BYTES = 4000
 MAX_FACT_CHARS = 500
 SUMMARY_CHARS = 200
+# Run summaries (kind 'summary') have their own budget: the last MAX_SUMMARIES, never counted against facts.
+MAX_SUMMARIES = 5
+EXPIRING = ("fact", "summary")
 
 
 class MemoryRefused(Exception):
@@ -22,6 +25,14 @@ def memory_write(conn, tenant: str, agent_id: str, kind: str, body: str, source_
     if kind == "fact" and len(body) > MAX_FACT_CHARS:
         raise MemoryRefused("too_large")
     flagged = _looks_like_instruction(body)
+    # An expired copy is not a duplicate: drop it so the same text can be stored again with a fresh expiry.
+    conn.execute(
+        """
+        DELETE FROM memory WHERE tenant_id = %s AND agent_id = %s AND run_id = %s AND kind = %s AND body = %s
+          AND expires_at <= now()
+        """,
+        (tenant, agent_id, run_id, kind, body),
+    )
     existing = conn.execute(
         """
         SELECT id FROM memory
@@ -32,7 +43,7 @@ def memory_write(conn, tenant: str, agent_id: str, kind: str, body: str, source_
     if existing:
         return existing[0]
     memory_id = f"{run_id}:{kind}:{body}"[:80]
-    expires = f"{FACT_TTL_DAYS} days" if kind == "fact" else None
+    expires = f"{FACT_TTL_DAYS} days" if kind in EXPIRING else None
     conn.execute(
         """
         INSERT INTO memory (id, tenant_id, agent_id, kind, body, source_ids, run_id, flagged, expires_at)
@@ -42,7 +53,24 @@ def memory_write(conn, tenant: str, agent_id: str, kind: str, body: str, source_
     )
     if kind == "fact":
         evict(conn, tenant, agent_id)
+    elif kind == "summary":
+        evict_summaries(conn, tenant, agent_id)
     return memory_id
+
+
+def evict_summaries(conn, tenant: str, agent_id: str) -> int:
+    """Keep the agent's last MAX_SUMMARIES run summaries (and none expired)."""
+    rows = conn.execute(
+        """
+        SELECT id, expires_at <= now() FROM memory WHERE tenant_id = %s AND agent_id = %s AND kind = 'summary'
+        ORDER BY created_at DESC, id DESC
+        """,
+        (tenant, agent_id),
+    ).fetchall()
+    drop = [memory_id for n, (memory_id, expired) in enumerate(rows) if n >= MAX_SUMMARIES or expired]
+    if drop:
+        conn.execute("DELETE FROM memory WHERE id = ANY(%s)", (drop,))
+    return len(drop)
 
 
 def evict(conn, tenant: str, agent_id: str) -> int:

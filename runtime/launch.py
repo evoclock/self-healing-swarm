@@ -21,6 +21,9 @@ TENANT_SUBNETS = {
 }
 # Docker hands out .1 to .7 (the gateway and the proxies, ip_range /29); runs take .16 to .254.
 FIRST_HOST = 16
+# A lease with no container yet is a launch in progress; after this long it is a launch that died.
+STALE_LAUNCH = "2 minutes"
+REAPABLE = ("exited", "dead")
 
 
 class NoFreeAddress(Exception):
@@ -104,18 +107,24 @@ def stop_agent(conn, tenant: str, container_id: str) -> None:
         release_ip(conn, tenant, ip)
 
 
-def reap_exited(conn) -> list[str]:
-    """Free addresses whose container has exited or is gone (runs the dispatcher started and nobody removed)."""
+def reap_exited(conn, inspect=inspect_container) -> list[str]:
+    """Free addresses whose container has exited, died or is gone, and leases from launches that never got a
+    container (older than STALE_LAUNCH). A container still 'created' or running is left alone."""
     freed = []
     for tenant in TENANT_SUBNETS:
         conn.execute("SELECT set_config('app.tenant_id', %s, false)", (tenant,))
+        stale = conn.execute(
+            "DELETE FROM ip_leases WHERE container_id IS NULL AND allocated_at < now() - %s::interval RETURNING ip",
+            (STALE_LAUNCH,),
+        ).fetchall()
+        freed.extend(str(row[0]) for row in stale)
         rows = conn.execute("SELECT ip, container_id FROM ip_leases WHERE container_id IS NOT NULL").fetchall()
         for ip, cid in rows:
             try:
-                running = inspect_container(cid)["State"]["Running"]
+                status = inspect(cid)["State"]["Status"]
             except RuntimeError:
-                running = False
-            if not running:
+                status = "missing"
+            if status in REAPABLE or status == "missing":
                 stop_agent(conn, tenant, cid)
                 freed.append(str(ip))
     return freed

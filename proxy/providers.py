@@ -22,6 +22,10 @@ PRICES = {"zai/glm-5.3-flash": (Decimal("0.00000026"), Decimal("0.00000026")), "
 PRICE_PER_TOKEN = {model: max(prices) for model, prices in PRICES.items()}
 
 
+# Quota is per provider, not per model name: every gateway model shares the gateway's limits.
+PROVIDER_OF = {"primary": "gateway", "local": "local"}
+
+
 class UnknownPrice(Exception):
     def __init__(self, model: str):
         self.model = model

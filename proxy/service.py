@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 from proxy.app import Call, decide, finish_step, resolve, write_denial
 from runtime.runs import LEASE_SECONDS
 from proxy.gate import Bound, Finished, admit_tool, claim_step, finish_state, load_bound, quota_reserve, quota_settle, write_event
-from proxy.providers import Cassette, KNOWN_MODELS, Provider, ReplayMiss, UnknownPrice, merge_trace_headers, reserve_cost, reserve_tokens, settle_cost, recorded_cost, step_digest
+from proxy.providers import Cassette, KNOWN_MODELS, Provider, ReplayMiss, PROVIDER_OF, UnknownPrice, merge_trace_headers, reserve_cost, reserve_tokens, settle_cost, recorded_cost, step_digest
 
 
 @dataclass
@@ -103,7 +103,8 @@ def complete(ctx: ProxyContext, conn, payload: dict, source_ip: str) -> tuple[in
     reserved = reserve_tokens(messages, tools) if metered else 0
     minute = None
     if metered:
-        minute = quota_reserve(conn, tenant, model, reserved, ctx.provider_tpm, ctx.provider_rpm)
+        provider = PROVIDER_OF.get(model, model)
+        minute = quota_reserve(conn, tenant, provider, reserved, ctx.provider_tpm, ctx.provider_rpm)
         if minute is None:
             finish_step(conn, tenant, run_id, step_no, digest, "FAILED", {"error": "quota"}, claimed.claim, (0, 0, Decimal(0)))
             write_event(conn, tenant, run_id, "quota_throttled", {"step_no": step_no, "model": model})
@@ -113,20 +114,22 @@ def complete(ctx: ProxyContext, conn, payload: dict, source_ip: str) -> tuple[in
     if ctx.mode != "replay" and model != "local":
         parent = ctx.parents.get((tenant, run_id))
         trace = merge_trace_headers(tenant, run_id, step_no, model, parent)
+    actual = 0
     try:
         with heartbeat(ctx, bound):
             completion = _provider(ctx).complete(messages, tools, model, project_id=bound.project_id, trace=trace)
+        actual = completion.tokens_in + completion.tokens_out
     except ReplayMiss as exc:
-        if minute is not None:
-            quota_settle(conn, tenant, model, minute, reserved, 0)
         finish_step(conn, tenant, run_id, step_no, digest, "FAILED", {"error": "replay_miss"}, claimed.claim)
         _note(ctx, _complete_line(409, tenant, run_id, step_no, model, {"error": "replay_miss"}, charge))
         return 409, {"error": "replay_miss", "digest": exc.digest}
+    finally:
+        # Any outcome, including a provider exception: replace the reservation with what was really used.
+        if minute is not None:
+            quota_settle(conn, tenant, provider, minute, reserved, actual)
     if completion.request_id:
         ctx.parents[(tenant, run_id)] = completion.request_id
     body = {"text": completion.text, "tokens_in": completion.tokens_in, "tokens_out": completion.tokens_out}
-    if minute is not None:
-        quota_settle(conn, tenant, model, minute, reserved, completion.tokens_in + completion.tokens_out)
     cost = Decimal(0) if model == "local" else settle_cost(model, completion.tokens_in, completion.tokens_out, completion.cost_usd)
     won = finish_step(
         conn,

@@ -165,15 +165,16 @@ def _dispatch(client, config: AgentConfig, run_id: str, scenario: str, executor)
 
 
 def _brief(client, config: AgentConfig, run_id: str, base: int = 0) -> dict:
-    """base offsets the step numbers for the one re-list after a new_mail retry (steps 11 to 14)."""
+    """base offsets the step numbers for each re-list after a new_mail retry (11 to 14, 21 to 24, ...)."""
     listed = client.tool("mail.list", {}, base + 1)
     messages = listed.get("messages") or []
     if not messages and "messages" in listed:
         # mail.list starts after the stored cursor; nothing new means nothing to brief. The proxy checks this.
         stored = client.state("SUCCEEDED", NO_NEW_MAIL)
-        if stored.get("retry") == "new_mail" and base == 0:
-            # Mail arrived between the list and the state post. List once more and brief it.
-            return _brief(client, config, run_id, base=10)
+        if stored.get("retry") == "new_mail":
+            # Mail arrived between the list and the state post: list again and brief it. Each round uses steps, so
+            # repeated races end in STOPPED_BUDGET (max_steps), never a run left RUNNING.
+            return _brief(client, config, run_id, base=base + 10)
         return {"state": stored.get("state"), "artifact": NO_NEW_MAIL}
     client.tool("mail.read", {"ids": [message["id"] for message in messages]}, base + 2)
     if getattr(client, "pause_after", None) == 2:
