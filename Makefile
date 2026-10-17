@@ -1,6 +1,7 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
+export HOST_REPO ?= $(CURDIR)
 .PHONY: up test drill record evals clean
 
 up:
@@ -18,7 +19,7 @@ drill: up
 	mkdir -p .audit recordings/steps
 	docker build -t swarm-agent -f Dockerfile.agent .
 	PROXY_MODE=replay docker compose up -d --wait --force-recreate proxy-a proxy-b
-	HOST_REPO="$(CURDIR)" docker compose --profile tools run --rm drill
+	docker compose --profile tools run --rm drill
 	test -s docs/drill-output.txt
 
 record: up
