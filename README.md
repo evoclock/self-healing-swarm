@@ -84,7 +84,7 @@ Hard checks require tenant-owned citations, a flagged external draft, the expect
 
 `evals.capture` sets `escape_denied` to the constant `True` for an escape case. That flag is not a sandbox result. The sandbox evidence is the drill's escape scenario.
 
-The eval recordings under `recordings/evals` are keyed by the config hash (id, instructions, models and tool list). `make capture` sends no tool definitions to the model, so the recorded outputs depend on the instructions and the models; the step cassettes are keyed separately, by the messages and the tools.
+Adding `mail.list` to the doc-analyst yamls changed the doc-analyst config hash. The committed eval recordings under `recordings/evals` are keyed by the old hash, and they were captured before the document prompt quoted every line. So `make evals` for doc-analyst misses until `make capture` runs again. The step cassettes are not affected, because their key is the messages and the tools.
 
 ## One command
 

@@ -1,6 +1,6 @@
 # Multi-tenant background agents
 
-evoclock. Principal AI Engineer take-home. 14 Oct 2026.
+Julen Gamboa. Principal AI Engineer take-home. 14 Oct 2026.
 
 ## Solution design
 
