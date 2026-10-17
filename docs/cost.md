@@ -33,4 +33,6 @@ Four projects now exist, one per tenant. Each has a monthly hard limit of 1 doll
 
 A read of organization usage for 1 Oct 2026 through 16 Oct 2026 showed 0.025478 dollars and 9 requests, on one key with no project. That read is not recomputed here. The documentation sample amounts are not this measurement.
 
-The Unified API rate limit is a different product. On the Professional plan it is 400 requests per minute for each linked account. Gateway model traffic is not that limit.
+Merge Gateway sets no default request or token rate limits for paid organisations; the model vendors' capacity bounds throughput ([rate limits](https://docs.merge.dev/merge-gateway/rate-limits)). A key can carry an optional `rate_limit_rpm`, and an organisation can have at most 25 open batches. This build sets neither and sends no batches. The 400 requests per minute figure belongs to Merge's Unified API Professional plan and does not apply to Gateway.
+
+`PROVIDER_TPM` (default 200000) and `PROVIDER_RPM` (default 120) in `docker-compose.yml` are this build's own per-provider budget, split across tenants. They are not limits set by Merge.
